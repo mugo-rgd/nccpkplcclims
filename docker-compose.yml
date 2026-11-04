@@ -1,200 +1,151 @@
-
 services:
-
-  # ============================================================
-  # LARAVEL APPLICATION
-  # ============================================================
   app:
     image: meterlab-php:${APP_IMAGE_TAG:-latest}
-
     build:
       context: .
       dockerfile: Dockerfile
-
     restart: unless-stopped
     working_dir: /var/www/html
-
     env_file:
       - path: .env
         required: false
-
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
       APP_KEY: ${APP_KEY:?APP_KEY is required}
       APP_URL: ${APP_URL:?APP_URL is required}
-
       DB_CONNECTION: mysql
       DB_HOST: db
       DB_PORT: "3306"
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-
       CACHE_STORE: ${CACHE_STORE:-database}
       SESSION_DRIVER: ${SESSION_DRIVER:-database}
       QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
-
       LOG_CHANNEL: stderr
-
     volumes:
       - type: volume
         source: meterlab_storage
         target: /var/www/html/storage/app
-
     depends_on:
       db:
         condition: service_healthy
-
     expose:
       - "9000"
-
     networks:
       - meterlab-network
 
-  # ============================================================
-  # INITIALIZE PUBLIC ASSETS FOR NGINX
-  # ============================================================
   public-init:
     image: meterlab-php:${APP_IMAGE_TAG:-latest}
-
     restart: "no"
-
     entrypoint:
       - /bin/sh
       - -c
-
     command:
       - |
         set -eu
-
         mkdir -p /shared-public
-
         cp -a /var/www/html/public/. /shared-public/
-
         echo "Public assets synchronized successfully."
-
     volumes:
       - type: volume
         source: public_assets
         target: /shared-public
-
     depends_on:
       app:
         condition: service_started
-
     networks:
       - meterlab-network
 
-  # ============================================================
-  # NGINX WEB SERVER
-  # ============================================================
   nginx:
     image: meterlab-nginx:${APP_IMAGE_TAG:-latest}
-
     build:
       context: .
       dockerfile: docker/nginx/Dockerfile
-
     restart: unless-stopped
-
     volumes:
-      # Laravel public assets
       - type: volume
         source: public_assets
         target: /var/www/html/public
         read_only: true
-
-      # Public Laravel storage only.
-      # Private documents are not exposed to Nginx.
       - type: volume
         source: meterlab_storage
         target: /var/www/html/storage/app/public
         read_only: true
         volume:
           subpath: public
-
     depends_on:
       app:
         condition: service_started
       public-init:
         condition: service_completed_successfully
-
     expose:
       - "80"
-
     networks:
       - meterlab-network
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.meterlab.rule=Host(`meterlab.kplcinstitute.ac.ke`)"
+      - "traefik.http.routers.meterlab.entrypoints=https"
+      - "traefik.http.routers.meterlab.tls=true"
+      - "traefik.http.routers.meterlab.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.meterlab.service=meterlab"
+      - "traefik.http.services.meterlab.loadbalancer.server.port=80"
 
-  # ============================================================
-  # MYSQL DATABASE
-  # ============================================================
   db:
     image: mysql:8.4
-
     restart: unless-stopped
-
     environment:
       MYSQL_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
       MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
       TZ: Africa/Nairobi
-
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-
     volumes:
       - type: volume
         source: mysql_data
         target: /var/lib/mysql
-
     healthcheck:
       test:
         - CMD-SHELL
         - mysqladmin ping -h 127.0.0.1 --silent || exit 1
-
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 60s
-
     networks:
       - meterlab-network
 
-  # ============================================================
-  # LARAVEL QUEUE WORKER
-  # ============================================================
   worker:
+    profiles:
+      - background-jobs
     image: meterlab-php:${APP_IMAGE_TAG:-latest}
-
-    restart: unless-stopped
+    restart: "no"
     working_dir: /var/www/html
-
     env_file:
       - path: .env
         required: false
-
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
       APP_KEY: ${APP_KEY:?APP_KEY is required}
       APP_URL: ${APP_URL:?APP_URL is required}
-
       DB_CONNECTION: mysql
       DB_HOST: db
       DB_PORT: "3306"
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-
       CACHE_STORE: ${CACHE_STORE:-database}
       SESSION_DRIVER: ${SESSION_DRIVER:-database}
       QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
-
       LOG_CHANNEL: stderr
-
     command:
       - php
       - artisan
@@ -202,88 +153,64 @@ services:
       - --sleep=3
       - --tries=3
       - --timeout=300
-
     volumes:
       - type: volume
         source: meterlab_storage
         target: /var/www/html/storage/app
-
     depends_on:
       db:
         condition: service_healthy
-
     networks:
       - meterlab-network
 
-  # ============================================================
-  # LARAVEL TASK SCHEDULER
-  # ============================================================
   scheduler:
+    profiles:
+      - background-jobs
     image: meterlab-php:${APP_IMAGE_TAG:-latest}
-
-    restart: unless-stopped
+    restart: "no"
     working_dir: /var/www/html
-
     env_file:
       - path: .env
         required: false
-
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
       APP_KEY: ${APP_KEY:?APP_KEY is required}
       APP_URL: ${APP_URL:?APP_URL is required}
-
       DB_CONNECTION: mysql
       DB_HOST: db
       DB_PORT: "3306"
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-
       CACHE_STORE: ${CACHE_STORE:-database}
       SESSION_DRIVER: ${SESSION_DRIVER:-database}
       QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
-
       LOG_CHANNEL: stderr
-
     command:
       - php
       - artisan
       - schedule:work
-
     volumes:
       - type: volume
         source: meterlab_storage
         target: /var/www/html/storage/app
-
     depends_on:
       db:
         condition: service_healthy
-
     networks:
       - meterlab-network
 
-# ============================================================
-# NETWORKS
-# ============================================================
 networks:
   meterlab-network:
     driver: bridge
+  coolify:
+    external: true
+    name: coolify
 
-# ============================================================
-# PERSISTENT VOLUMES
-# ============================================================
 volumes:
-
-  # Existing Coolify MySQL database volume.
-  # Do not delete or recreate during migration.
   mysql_data:
-
-  # Complete Laravel storage/app directory.
   meterlab_storage:
     external: true
     name: meterlab-storage-complete
-
-  # Shared Laravel public assets for Nginx.
   public_assets:
