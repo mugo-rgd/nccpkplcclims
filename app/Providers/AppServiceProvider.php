@@ -10,6 +10,7 @@ use Illuminate\Pagination\Paginator;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
@@ -40,21 +41,58 @@ class AppServiceProvider extends ServiceProvider
     public function boot(Router $router): void
     {
         /*
-         * Use Bootstrap 5 pagination globally.
-         */
+        |--------------------------------------------------------------------------
+        | Force HTTPS URL Generation in Production
+        |--------------------------------------------------------------------------
+        |
+        | The production application runs behind Coolify/Traefik
+        | and Nginx.
+        |
+        | The public website uses HTTPS, but Laravel may detect
+        | the internal proxy connection as HTTP.
+        |
+        | This can generate insecure URLs for:
+        | - CSS and JavaScript assets
+        | - Application routes
+        | - AJAX requests
+        |
+        | Browsers block these HTTP requests when the page
+        | itself is loaded over HTTPS (Mixed Content).
+        |
+        | Force Laravel to generate HTTPS URLs in production.
+        | Local development remains unchanged.
+        |
+        */
+
+        if ($this->app->environment('production')) {
+            URL::forceScheme('https');
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Bootstrap 5 Pagination
+        |--------------------------------------------------------------------------
+        */
+
         Paginator::useBootstrapFive();
 
         /*
-         * Register certificate policy.
-         */
+        |--------------------------------------------------------------------------
+        | Certificate Policy
+        |--------------------------------------------------------------------------
+        */
+
         Gate::policy(
             Certificate::class,
             CertificatePolicy::class
         );
 
         /*
-         * Register Spatie permission middleware aliases.
-         */
+        |--------------------------------------------------------------------------
+        | Spatie Permission Middleware Aliases
+        |--------------------------------------------------------------------------
+        */
+
         $router->aliasMiddleware(
             'role',
             RoleMiddleware::class
@@ -71,11 +109,15 @@ class AppServiceProvider extends ServiceProvider
         );
 
         /*
-         * Rate limiter.
-         *
-         * Keep or adjust this only if you already use
-         * the "api" limiter in your application.
-         */
+        |--------------------------------------------------------------------------
+        | API Rate Limiting
+        |--------------------------------------------------------------------------
+        |
+        | Limit requests to 60 per minute per authenticated user.
+        | For unauthenticated requests, use the client IP.
+        |
+        */
+
         RateLimiter::for(
             'api',
             function (Request $request) {
