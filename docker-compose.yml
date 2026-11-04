@@ -210,7 +210,11 @@ networks:
 
 volumes:
   mysql_data:
+    external: true
+    name: 5stpve98i0rozijtytzuupgl_mysql-data
+
   meterlab_storage:
     external: true
     name: meterlab-storage-complete
+
   public_assets:
