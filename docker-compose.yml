@@ -1,77 +1,88 @@
+
+name: meterlab
+
 services:
 
-  # ==============================================================
-  # Laravel PHP-FPM Application
-  # ==============================================================
-
+  # ============================================================
+  # LARAVEL PHP-FPM APPLICATION
+  # ============================================================
   app:
+    image: meterlab-php:${APP_IMAGE_TAG:-latest}
+
     build:
       context: .
       dockerfile: Dockerfile
 
-    container_name: meterlab-app
-
     restart: unless-stopped
-
     working_dir: /var/www/html
 
-    env_file:
-      - .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+      CACHE_STORE: ${CACHE_STORE:-database}
+      SESSION_DRIVER: ${SESSION_DRIVER:-database}
+      QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
+
+      LOG_CHANNEL: stderr
 
     volumes:
-      - ./:/var/www/html
-      - vendor_data:/var/www/html/vendor
-      - build_data:/var/www/html/public/build
+      - laravel_storage:/var/www/html/storage/app/public
 
     depends_on:
       db:
         condition: service_healthy
 
+    expose:
+      - "9000"
+
     networks:
       - meterlab-network
 
-
-  # ==============================================================
-  # Nginx
-  # ==============================================================
-
+  # ============================================================
+  # NGINX WEB SERVER
+  # ============================================================
   nginx:
     image: nginx:alpine
-    container_name: meterlab-nginx
+
     restart: unless-stopped
-  
-    ports:
-      - "80:80"
-      - "443:443"
-  
+
     volumes:
-      - ./:/var/www/html:ro
+      - public_assets:/var/www/html/public:ro
+      - laravel_storage:/var/www/html/storage/app/public:ro
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./docker/certbot/www:/var/www/certbot:ro
-      - ./docker/certbot/conf:/etc/letsencrypt:ro
-  
+
     depends_on:
       - app
-  
+
+    expose:
+      - "80"
+
     networks:
       - meterlab-network
 
-  # ==============================================================
-  # MySQL
-  # ==============================================================
-
+  # ============================================================
+  # MYSQL DATABASE
+  # ============================================================
   db:
     image: mysql:8.4
-
-    container_name: meterlab-db
 
     restart: unless-stopped
 
     environment:
-      MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
       TZ: Africa/Nairobi
 
     command:
@@ -83,116 +94,118 @@ services:
 
     healthcheck:
       test:
-        [
-          "CMD-SHELL",
-          "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD || exit 1"
-        ]
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 --silent || exit 1
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 40s
+      start_period: 60s
 
     networks:
       - meterlab-network
 
-
-  # ==============================================================
-  # Laravel Queue Worker
-  # ==============================================================
-
+  # ============================================================
+  # LARAVEL QUEUE WORKER
+  # ============================================================
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
-    container_name: meterlab-worker
+    image: meterlab-php:${APP_IMAGE_TAG:-latest}
 
     restart: unless-stopped
-
     working_dir: /var/www/html
 
-    env_file:
-      - .env
-
     command:
-      [
-        "php",
-        "artisan",
-        "queue:work",
-        "--sleep=3",
-        "--tries=3",
-        "--timeout=300"
-      ]
+      - php
+      - artisan
+      - queue:work
+      - --sleep=3
+      - --tries=3
+      - --timeout=300
+
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+      QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
+      CACHE_STORE: ${CACHE_STORE:-database}
+      SESSION_DRIVER: ${SESSION_DRIVER:-database}
+      LOG_CHANNEL: stderr
 
     volumes:
-      - ./:/var/www/html
-      - vendor_data:/var/www/html/vendor
-      - build_data:/var/www/html/public/build
+      - laravel_storage:/var/www/html/storage/app/public
 
     depends_on:
       db:
         condition: service_healthy
+      app:
+        condition: service_started
 
     networks:
       - meterlab-network
 
-
-  # ==============================================================
-  # Laravel Scheduler
-  # ==============================================================
-
+  # ============================================================
+  # LARAVEL SCHEDULER
+  # ============================================================
   scheduler:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
-    container_name: meterlab-scheduler
+    image: meterlab-php:${APP_IMAGE_TAG:-latest}
 
     restart: unless-stopped
-
     working_dir: /var/www/html
 
-    env_file:
-      - .env
-
     command:
-      [
-        "php",
-        "artisan",
-        "schedule:work"
-      ]
+      - php
+      - artisan
+      - schedule:work
+
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+      QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
+      CACHE_STORE: ${CACHE_STORE:-database}
+      SESSION_DRIVER: ${SESSION_DRIVER:-database}
+      LOG_CHANNEL: stderr
 
     volumes:
-      - ./:/var/www/html
-      - vendor_data:/var/www/html/vendor
-      - build_data:/var/www/html/public/build
+      - laravel_storage:/var/www/html/storage/app/public
 
     depends_on:
       db:
         condition: service_healthy
+      app:
+        condition: service_started
 
     networks:
       - meterlab-network
 
-
-# ==================================================================
-# Networks
-# ==================================================================
-
+# ================================================================
+# NETWORKS
+# ================================================================
 networks:
-
   meterlab-network:
     driver: bridge
 
-
-# ==================================================================
-# Persistent Volumes
-# ==================================================================
-
+# ================================================================
+# PERSISTENT VOLUMES
+# ================================================================
 volumes:
-
   mysql_data:
-
-  vendor_data:
-
-  build_data:
+  laravel_storage:
+  public_assets:
