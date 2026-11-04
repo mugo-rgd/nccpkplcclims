@@ -10,9 +10,6 @@
     $batchCount = $batchCount ?? 0;
 @endphp
 
-{{-- @once
-    <link rel="stylesheet" href="{{ asset('css/sidebar.css') }}">
-@endonce --}}
 
 <div id="appSidebar" class="col-md-2 sidebar d-none d-md-block">
     <div class="sidebar-logo">
