@@ -1,0 +1,8 @@
+Equipment Name,Serial Number,Manufacturer,Model,Accuracy Class,Ratings,Equipment Type,Equipment Condition,Last Calibration Date,Notes
+Single Phase Meter,SN2025001,Hexing,HXE-320,1,230V 10-100A 50Hz,Single Phase Meter,Good,15/01/2024,Test required
+Single Phase Meter,SN2025002,Hexing,HXE-321,1,230V 10-100A 50Hz,Single Phase Meter,Good,20/02/2024,Test required
+Single Phase Meter,SN2025003,Hexing,HXE-322,1,230V 10-100A 50Hz,Single Phase Meter,Good,10/03/2024,Test required
+Three Phase Meter,SN2025004,Hexing,HXE-323,0.5S,400V 5-100A 50Hz,Three Phase Meter,Good,10/03/2024,Test required
+Three Phase Meter,SN2025005,Hexing,HXE-324,0.5S,400V 5-100A 50Hz,Three Phase Meter,Good,01/04/2024,Test required
+Three Phase Meter,SN2025006,Hexing,HXE-325,0.5S,400V 5-100A 50Hz,Three Phase Meter,Good,15/05/2024,Test required
+Three Phase Meter,SN2025007,Hexing,HXE-326,0.5S,400V 5-100A 50Hz,Three Phase Meter,Good,01/06/2024,Test required

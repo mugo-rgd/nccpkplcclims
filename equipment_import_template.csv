@@ -1,0 +1,8 @@
+﻿Equipment Name,Serial Number,Manufacturer,Model,Accuracy Class,Ratings,Equipment Type,Equipment Condition,Last Calibration Date,Notes
+Single Phase Meter,SN2024001,Hexing,HXE-320,1.0,230V 10-100A 50Hz,Single Phase Meter,Good,2024-01-15,Routine calibration
+Three Phase Meter,SN2024002,Landis+Gyr,MK6E,0.5S,400V 5-100A 50Hz,Three Phase Meter,Excellent,2024-02-20,New equipment
+Current Transformer,CT2024001,Ritz,KSO 1811,0.2,5A 50Hz,Current Transformer (CT),Good,2024-03-10,For testing
+Voltage Transformer,VT2024001,Ritz,KSO 1811,0.2,240V 50Hz,Voltage Transformer (VT),Good,2024-03-10,For testing
+Multimeter,MM2024001,Fluke,87V,0.1,1000V,Multimeter,Excellent,2024-04-01,Calibration required
+Insulation Tester,IT2024001,Megger,MIT525,2.0,5000V,Insulation Tester,Good,2024-05-15,Need repair
+Circuit Breaker,CB2024001,Siemens,3VA,1.0,100A,Circuit Breaker,Fair,2024-06-01,Test required

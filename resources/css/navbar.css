@@ -1,0 +1,772 @@
+/* ==========================================================
+   KPLC METER CENTRAL LABORATORY NAVBAR
+   Complete standalone stylesheet
+   ========================================================== */
+
+:root {
+    --navbar-primary: #0b2d5c;
+    --navbar-primary-dark: #071e3e;
+    --navbar-primary-light: #184785;
+
+    --navbar-accent: #f2b705;
+    --navbar-success: #249b57;
+    --navbar-success-dark: #1f7f49;
+    --navbar-danger: #dc3545;
+
+    --navbar-surface: #ffffff;
+    --navbar-surface-soft: #f5f8fc;
+
+    --navbar-text: #ffffff;
+    --navbar-muted: #c4d2e6;
+
+    --navbar-border: rgba(255, 255, 255, 0.14);
+    --navbar-shadow: 0 14px 34px rgba(2, 12, 27, 0.28);
+}
+
+/* ==========================================================
+   NAVBAR CONTAINER
+   ========================================================== */
+
+.navbar-top {
+    position: sticky;
+    top: 0;
+    z-index: 1035;
+
+    min-height: 74px;
+    padding: 0;
+
+    border-bottom: 4px solid var(--navbar-accent);
+
+    background:
+        linear-gradient(135deg,
+            var(--navbar-primary-dark) 0%,
+            var(--navbar-primary) 55%,
+            #123b73 100%);
+
+    box-shadow: 0 8px 24px rgba(2, 12, 27, 0.28);
+}
+
+.navbar-top .container-fluid {
+    min-height: 74px;
+}
+
+/* ==========================================================
+   BRAND
+   ========================================================== */
+
+.navbar-top .navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    min-width: 0;
+    margin-right: 18px;
+
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.navbar-top .navbar-brand:hover,
+.navbar-top .navbar-brand:focus {
+    color: #ffffff;
+}
+
+.navbar-top .navbar-brand img {
+    width: 46px;
+    height: 46px;
+
+    flex: 0 0 46px;
+
+    padding: 4px;
+
+    border-radius: 12px;
+
+    background: #ffffff;
+
+    object-fit: contain;
+
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
+}
+
+.navbar-top .navbar-brand>i {
+    width: 46px;
+    height: 46px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 46px;
+
+    margin-right: 0 !important;
+
+    border-radius: 12px;
+
+    background: var(--navbar-accent);
+    color: var(--navbar-primary-dark);
+
+    font-size: 21px;
+
+    box-shadow: 0 7px 18px rgba(242, 183, 5, 0.30);
+}
+
+.navbar-top .brand-text {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+
+    color: #ffffff;
+
+    font-size: 1rem;
+    font-weight: 800;
+
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+}
+
+.navbar-top .brand-text small {
+    margin-top: 4px;
+
+    overflow: hidden;
+
+    color: var(--navbar-muted);
+
+    font-size: 0.74rem;
+    font-weight: 600;
+
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.navbar-top .env-badge {
+    padding: 5px 8px;
+
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 999px;
+
+    font-size: 0.65rem;
+    font-weight: 800;
+
+    letter-spacing: 0.06em;
+}
+
+/* ==========================================================
+   TOGGLE BUTTONS
+   ========================================================== */
+
+.navbar-top .sidebar-toggle-btn {
+    width: 44px;
+    height: 44px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 44px;
+
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 11px;
+
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+
+    font-size: 1rem;
+
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease,
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.navbar-top .sidebar-toggle-btn:hover,
+.navbar-top .sidebar-toggle-btn:focus {
+    border-color: var(--navbar-accent);
+
+    background: var(--navbar-accent);
+    color: var(--navbar-primary-dark);
+
+    transform: translateY(-1px);
+
+    box-shadow: 0 8px 18px rgba(242, 183, 5, 0.22);
+}
+
+.navbar-top .navbar-toggler {
+    width: 44px;
+    height: 44px;
+
+    padding: 8px;
+
+    border: 1px solid rgba(255, 255, 255, 0.28) !important;
+    border-radius: 11px;
+
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.navbar-top .navbar-toggler:focus {
+    box-shadow: 0 0 0 0.22rem rgba(242, 183, 5, 0.28);
+}
+
+/* ==========================================================
+   TOP MENU SCROLL AREA
+   ========================================================== */
+
+.navbar-top .top-menu-scroll {
+    min-width: 0;
+
+    overflow-x: auto;
+    overflow-y: visible;
+
+    padding: 6px 2px;
+
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.navbar-top .top-menu-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+/* ==========================================================
+   NAVIGATION LINKS
+   ========================================================== */
+
+.navbar-top .navbar-nav {
+    gap: 4px;
+}
+
+.navbar-top .nav-item {
+    position: relative;
+}
+
+.navbar-top .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    min-height: 46px;
+
+    padding: 8px 10px;
+
+    border: 1px solid transparent;
+    border-radius: 11px;
+
+    color: #eaf1fb !important;
+
+    font-size: 0.86rem;
+    font-weight: 700;
+
+    white-space: nowrap;
+
+    transition:
+        background 0.2s ease,
+        color 0.2s ease,
+        border-color 0.2s ease,
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.navbar-top .nav-link:hover,
+.navbar-top .nav-link:focus {
+    border-color: rgba(255, 255, 255, 0.20);
+
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff !important;
+
+    transform: translateY(-1px);
+}
+
+.navbar-top .nav-link.active {
+    border-color: var(--navbar-accent);
+
+    background: var(--navbar-accent);
+    color: var(--navbar-primary-dark) !important;
+
+    box-shadow: 0 8px 18px rgba(242, 183, 5, 0.24);
+}
+
+.navbar-top .nav-link.active::after {
+    content: none;
+}
+
+/* ==========================================================
+   ICON BASE - 32PX
+   ========================================================== */
+
+.navbar-top .menu-icon {
+    width: 32px;
+    height: 32px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 32px;
+
+    border-radius: 9px;
+
+    background: rgba(255, 255, 255, 0.12);
+
+    font-size: 0.9rem;
+
+    transition:
+        background 0.2s ease,
+        color 0.2s ease,
+        transform 0.2s ease;
+}
+
+.navbar-top .menu-icon i {
+    font-size: 15px;
+}
+
+.navbar-top .nav-link:hover .menu-icon,
+.navbar-top .nav-link:focus .menu-icon {
+    background: rgba(255, 255, 255, 0.18);
+    transform: scale(1.04);
+}
+
+.navbar-top .nav-link.active .menu-icon {
+    background: var(--navbar-primary-dark);
+}
+
+.navbar-top .nav-link.active .menu-icon i {
+    color: #ffffff !important;
+}
+
+/* ==========================================================
+   COLOURED MODULE ICONS
+   ========================================================== */
+
+.navbar-top .menu-dashboard i {
+    color: #4cd964 !important;
+}
+
+.navbar-top .menu-lab i {
+    color: #2ec7ff !important;
+}
+
+.navbar-top .menu-customers i,
+.navbar-top .menu-users i {
+    color: #29b6f6 !important;
+}
+
+.navbar-top .menu-quotes i {
+    color: #b388ff !important;
+}
+
+.navbar-top .menu-certificates i {
+    color: #ff6b70 !important;
+}
+
+.navbar-top .menu-jobcards i {
+    color: #ffd54f !important;
+}
+
+.navbar-top .menu-delivery i {
+    color: #66bb6a !important;
+}
+
+.navbar-top .menu-collection i {
+    color: #26c6da !important;
+}
+
+.navbar-top .menu-request i {
+    color: #ff9800 !important;
+}
+
+.navbar-top .menu-quality i,
+.navbar-top .menu-objectives i,
+.navbar-top .menu-achievements i {
+    color: #9ccc65 !important;
+}
+
+.navbar-top .menu-actions i {
+    color: #ff7043 !important;
+}
+
+.navbar-top .menu-reports i {
+    color: #64b5f6 !important;
+}
+
+.navbar-top .menu-chat i {
+    color: #ec407a !important;
+}
+
+.navbar-top .menu-guide i {
+    color: #ffa726 !important;
+}
+
+.navbar-top .menu-equipment i {
+    color: #b39ddb !important;
+}
+
+.navbar-top .menu-audit i {
+    color: #b0bec5 !important;
+}
+
+.navbar-top .menu-more i {
+    color: #d7e3f3 !important;
+}
+
+.navbar-top .menu-profile i {
+    color: #90caf9 !important;
+}
+
+.navbar-top .menu-login i {
+    color: #80cbc4 !important;
+}
+
+.navbar-top .menu-logout i {
+    color: #ff6b6b !important;
+}
+
+/* ==========================================================
+   NEW REQUEST
+   ========================================================== */
+
+.navbar-top .menu-new {
+    background: rgba(36, 155, 87, 0.22);
+}
+
+.navbar-top .menu-new i {
+    color: #ffffff !important;
+}
+
+.navbar-top .new-request-link {
+    border-color: rgba(118, 230, 162, 0.45);
+
+    background: var(--navbar-success);
+    color: #ffffff !important;
+
+    font-weight: 800;
+
+    box-shadow: 0 7px 16px rgba(36, 155, 87, 0.24);
+}
+
+.navbar-top .new-request-link:hover,
+.navbar-top .new-request-link:focus,
+.navbar-top .new-request-link.active {
+    border-color: #7ce0a4;
+
+    background: var(--navbar-success-dark);
+    color: #ffffff !important;
+}
+
+.navbar-top .new-request-link .menu-icon,
+.navbar-top .new-request-link:hover .menu-icon,
+.navbar-top .new-request-link:focus .menu-icon,
+.navbar-top .new-request-link.active .menu-icon {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.navbar-top .new-request-link .menu-icon i,
+.navbar-top .new-request-link:hover .menu-icon i,
+.navbar-top .new-request-link:focus .menu-icon i,
+.navbar-top .new-request-link.active .menu-icon i {
+    color: #ffffff !important;
+}
+
+/* ==========================================================
+   DROPDOWNS
+   ========================================================== */
+
+.navbar-top .dropdown-menu {
+    min-width: 255px;
+    max-height: calc(100vh - 96px);
+
+    padding: 10px;
+
+    overflow-y: auto;
+
+    border: 1px solid #cfd9e7;
+    border-radius: 14px;
+
+    background: #ffffff;
+
+    box-shadow: var(--navbar-shadow);
+}
+
+.navbar-top .dropdown-menu-end {
+    right: 0;
+    left: auto;
+}
+
+.navbar-top .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+
+    min-height: 46px;
+
+    padding: 8px 10px;
+
+    border: 1px solid transparent;
+    border-radius: 10px;
+
+    color: #172033 !important;
+
+    font-size: 0.86rem;
+    font-weight: 650;
+
+    transition:
+        background 0.2s ease,
+        color 0.2s ease,
+        border-color 0.2s ease;
+}
+
+.navbar-top .dropdown-item .menu-icon {
+    background: #e8eef6;
+}
+
+.navbar-top .dropdown-item:hover,
+.navbar-top .dropdown-item:focus {
+    border-color: #d4dfec;
+
+    background: #f3f6fa;
+    color: var(--navbar-primary) !important;
+}
+
+.navbar-top .dropdown-item:hover .menu-icon,
+.navbar-top .dropdown-item:focus .menu-icon {
+    background: #dce8f5;
+}
+
+.navbar-top .dropdown-item.active,
+.navbar-top .dropdown-item:active {
+    border-color: var(--navbar-primary);
+
+    background: var(--navbar-primary);
+    color: #ffffff !important;
+}
+
+.navbar-top .dropdown-item.active .menu-icon,
+.navbar-top .dropdown-item:active .menu-icon {
+    background: var(--navbar-primary-dark);
+}
+
+.navbar-top .dropdown-item.active .menu-icon i,
+.navbar-top .dropdown-item:active .menu-icon i {
+    color: #ffffff !important;
+}
+
+.navbar-top .dropdown-divider {
+    margin: 8px 4px;
+    border-color: #d9e1ec;
+}
+
+/* ==========================================================
+   STAFF BADGE
+   ========================================================== */
+
+.navbar-top .badge-staff {
+    padding: 5px 8px;
+
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 999px;
+
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+
+    font-size: 0.68rem;
+    font-weight: 800;
+}
+
+/* ==========================================================
+   MORE MENU / BADGES
+   ========================================================== */
+
+.navbar-top .more-menu-wrapper {
+    position: relative;
+    z-index: 1040;
+}
+
+.navbar-top .more-menu-wrapper .dropdown-menu {
+    z-index: 1060;
+}
+
+.navbar-top #unreadBadge {
+    min-width: 18px;
+    height: 18px;
+
+    padding: 0 5px;
+
+    border: 2px solid #ffffff;
+    border-radius: 999px;
+
+    font-weight: 800;
+    line-height: 14px;
+}
+
+/* ==========================================================
+   PROFILE / RIGHT AREA
+   ========================================================== */
+
+.navbar-top .navbar-nav.ms-auto .nav-link {
+    max-width: 210px;
+
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+}
+
+/* ==========================================================
+   RESPONSIVE
+   ========================================================== */
+
+@media (max-width: 1199.98px) {
+    .navbar-top .nav-link {
+        padding-right: 9px;
+        padding-left: 9px;
+
+        font-size: 0.84rem;
+    }
+}
+
+@media (max-width: 991.98px) {
+    .navbar-top {
+        min-height: 68px;
+    }
+
+    .navbar-top .container-fluid {
+        min-height: 68px;
+    }
+
+    .navbar-top .brand-text small {
+        display: none;
+    }
+
+    .navbar-top .env-badge {
+        display: none;
+    }
+
+    .navbar-top .navbar-collapse {
+        margin-top: 10px;
+        padding: 12px 0 16px;
+
+        border-top: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .navbar-top .top-menu-scroll {
+        width: 100%;
+
+        overflow-x: auto;
+        overflow-y: visible;
+
+        padding: 5px 0 9px;
+    }
+
+    .navbar-top .navbar-nav.ms-auto {
+        margin-top: 10px;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .navbar-top .navbar-collapse .navbar-nav {
+        flex-direction: column !important;
+        align-items: stretch !important;
+
+        width: 100%;
+
+        gap: 6px;
+    }
+
+    .navbar-top .top-menu-scroll {
+        overflow: visible;
+    }
+
+    .navbar-top .nav-item,
+    .navbar-top .nav-link {
+        width: 100%;
+    }
+
+    .navbar-top .nav-link {
+        justify-content: flex-start;
+    }
+
+    .navbar-top .dropdown-menu {
+        position: static !important;
+
+        width: 100%;
+
+        margin-top: 5px;
+
+        transform: none !important;
+
+        box-shadow: none;
+    }
+
+    .navbar-top .more-menu-wrapper {
+        width: 100%;
+
+        margin-right: 0 !important;
+    }
+
+    .navbar-top .navbar-nav.ms-auto .nav-link {
+        max-width: none;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .navbar-top .container-fluid {
+        padding-right: 12px !important;
+        padding-left: 12px !important;
+    }
+
+    .navbar-top .navbar-brand img,
+    .navbar-top .navbar-brand>i {
+        width: 40px;
+        height: 40px;
+
+        flex-basis: 40px;
+    }
+
+    .navbar-top .brand-text {
+        max-width: 165px;
+
+        overflow: hidden;
+
+        font-size: 0.88rem;
+
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .navbar-top .sidebar-toggle-btn {
+        width: 40px;
+        height: 40px;
+
+        flex-basis: 40px;
+    }
+
+    .navbar-top .nav-link {
+        min-height: 48px;
+
+        padding: 8px 10px;
+
+        font-size: 0.88rem;
+    }
+}
+
+/* ==========================================================
+   ACCESSIBILITY
+   ========================================================== */
+
+.navbar-top .nav-link:focus-visible,
+.navbar-top .sidebar-toggle-btn:focus-visible,
+.navbar-top .navbar-toggler:focus-visible,
+.navbar-top .dropdown-item:focus-visible {
+    outline: 3px solid rgba(242, 183, 5, 0.62);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .navbar-top *,
+    .navbar-top *::before,
+    .navbar-top *::after {
+        transition: none !important;
+    }
+}

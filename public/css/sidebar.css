@@ -1,0 +1,565 @@
+/* ==========================================================
+   KPLC METER CENTRAL LABORATORY SIDEBAR
+   Complete standalone stylesheet
+   ========================================================== */
+
+:root {
+    --sidebar-primary: #0b2d5c;
+    --sidebar-primary-dark: #03162f;
+    --sidebar-primary-mid: #0a274d;
+    --sidebar-primary-light: #14508f;
+
+    --sidebar-accent: #f2b705;
+    --sidebar-success: #1fa24a;
+    --sidebar-success-dark: #17813b;
+    --sidebar-danger: #dc3545;
+
+    --sidebar-text: #ffffff;
+    --sidebar-muted: #d3deed;
+    --sidebar-hover: #1a4d88;
+    --sidebar-icon-bg: #1f4d8b;
+
+    --sidebar-border: #f2b705;
+    --sidebar-shadow: 10px 0 30px rgba(2, 12, 27, 0.28);
+}
+
+/* ==========================================================
+   SIDEBAR CONTAINER
+   ========================================================== */
+
+#appSidebar.sidebar {
+    position: sticky;
+    top: 74px;
+
+    flex: 0 0 260px;
+    width: 260px;
+    max-width: 260px;
+
+    height: calc(100vh - 74px);
+    min-height: calc(100vh - 74px);
+
+    padding: 18px 12px 24px;
+
+    overflow-x: hidden;
+    overflow-y: auto;
+
+    border-right: 4px solid var(--sidebar-border);
+
+    background:
+        radial-gradient(circle at top right,
+            rgba(255, 255, 255, 0.12),
+            transparent 38%),
+        linear-gradient(180deg,
+            var(--sidebar-primary-dark) 0%,
+            var(--sidebar-primary-mid) 24%,
+            var(--sidebar-primary) 58%,
+            var(--sidebar-primary-light) 100%);
+
+    box-shadow: var(--sidebar-shadow);
+
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.38) transparent;
+}
+
+/* ==========================================================
+   SCROLLBAR
+   ========================================================== */
+
+#appSidebar.sidebar::-webkit-scrollbar {
+    width: 5px;
+}
+
+#appSidebar.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#appSidebar.sidebar::-webkit-scrollbar-thumb {
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.38);
+}
+
+#appSidebar.sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.58);
+}
+
+/* ==========================================================
+   LOGO CARD
+   ========================================================== */
+
+#appSidebar .sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    margin: 0 2px 24px;
+    padding: 14px 12px;
+
+    border: 1px solid rgba(255, 255, 255, 0.92);
+    border-radius: 15px;
+
+    background: #ffffff;
+
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.20);
+}
+
+#appSidebar .sidebar-logo img {
+    width: 44px;
+    height: 44px;
+
+    flex: 0 0 44px;
+
+    padding: 4px;
+
+    border-radius: 11px;
+
+    background: #ffffff;
+
+    object-fit: contain;
+}
+
+#appSidebar .sidebar-logo>i {
+    width: 44px;
+    height: 44px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 44px;
+
+    border-radius: 11px;
+
+    background: var(--sidebar-accent);
+    color: var(--sidebar-primary-dark) !important;
+
+    font-size: 20px;
+}
+
+#appSidebar .sidebar-brand {
+    color: var(--sidebar-primary) !important;
+
+    font-size: 0.88rem;
+    font-weight: 900;
+
+    letter-spacing: 0.05em;
+    line-height: 1.25;
+}
+
+/* ==========================================================
+   SECTION TITLES
+   ========================================================== */
+
+#appSidebar .nav-section-title {
+    position: relative;
+
+    margin: 22px 8px 10px;
+    padding-left: 10px;
+
+    color: var(--sidebar-accent) !important;
+
+    font-size: 0.70rem;
+    font-weight: 900;
+
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+#appSidebar .nav-section-title::before {
+    content: "";
+
+    position: absolute;
+    top: 50%;
+    left: 0;
+
+    width: 4px;
+    height: 14px;
+
+    border-radius: 99px;
+
+    background: var(--sidebar-accent);
+
+    transform: translateY(-50%);
+}
+
+/* ==========================================================
+   NAVIGATION LINKS
+   ========================================================== */
+
+#appSidebar .nav-link {
+    position: relative;
+
+    display: flex;
+    align-items: center;
+    gap: 11px;
+
+    min-height: 48px;
+
+    margin-bottom: 6px;
+    padding: 8px 10px;
+
+    border: 1px solid transparent;
+    border-left: 4px solid transparent;
+    border-radius: 11px;
+
+    background: transparent;
+
+    color: var(--sidebar-text) !important;
+    opacity: 1 !important;
+
+    font-size: 0.88rem;
+    font-weight: 700;
+
+    text-decoration: none;
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease,
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+/* Protect sidebar colours from global rules */
+#appSidebar .nav-link>span:not(.badge),
+#appSidebar .nav-link>i,
+#appSidebar .nav-link .menu-icon i {
+    color: inherit;
+    opacity: 1 !important;
+}
+
+/* Hover / focus */
+#appSidebar .nav-link:hover,
+#appSidebar .nav-link:focus {
+    border-color: rgba(255, 255, 255, 0.22);
+    border-left-color: var(--sidebar-accent);
+
+    background: var(--sidebar-hover);
+
+    color: #ffffff !important;
+
+    transform: translateX(4px);
+
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+/* Active link */
+#appSidebar .nav-link.active {
+    border-color: rgba(255, 255, 255, 0.95);
+    border-left: 5px solid var(--sidebar-accent);
+
+    background: #ffffff;
+
+    color: var(--sidebar-primary) !important;
+
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.20);
+}
+
+/* ==========================================================
+   ICON BASE
+   ========================================================== */
+
+#appSidebar .menu-icon {
+    width: 32px;
+    height: 32px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 32px;
+
+    border-radius: 9px;
+
+    background: var(--sidebar-icon-bg);
+
+    font-size: 15px;
+
+    transition:
+        background 0.2s ease,
+        color 0.2s ease,
+        transform 0.2s ease;
+}
+
+#appSidebar .menu-icon i {
+    font-size: 15px;
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+#appSidebar .nav-link:hover .menu-icon,
+#appSidebar .nav-link:focus .menu-icon {
+    background: #2c67b1;
+    transform: scale(1.05);
+}
+
+/* Active icon becomes dark blue with white symbol */
+#appSidebar .nav-link.active .menu-icon {
+    background: var(--sidebar-primary) !important;
+}
+
+#appSidebar .nav-link.active .menu-icon i {
+    color: #ffffff !important;
+}
+
+/* ==========================================================
+   COLOURED MODULE ICONS
+   ========================================================== */
+
+/* Dashboard */
+#appSidebar .menu-dashboard i {
+    color: #4cd964 !important;
+}
+
+/* Calibrations */
+#appSidebar .menu-lab i {
+    color: #2ec7ff !important;
+}
+
+/* Batches */
+#appSidebar .menu-batches i {
+    color: #9fa8da !important;
+}
+
+/* Quotes */
+#appSidebar .menu-quotes i {
+    color: #b388ff !important;
+}
+
+/* Certificates */
+#appSidebar .menu-certificates i {
+    color: #ff6b70 !important;
+}
+
+/* Job Cards */
+#appSidebar .menu-jobcards i {
+    color: #ffd54f !important;
+}
+
+/* Delivery Notes */
+#appSidebar .menu-delivery i {
+    color: #66bb6a !important;
+}
+
+/* Collection Notes */
+#appSidebar .menu-collection i {
+    color: #26c6da !important;
+}
+
+/* Request Forms */
+#appSidebar .menu-request i {
+    color: #ff9800 !important;
+}
+
+/* Customers */
+#appSidebar .menu-customers i {
+    color: #29b6f6 !important;
+}
+
+/* Quality Control */
+#appSidebar .menu-quality i {
+    color: #9ccc65 !important;
+}
+
+/* Objectives */
+#appSidebar .menu-objectives i {
+    color: #ffc107 !important;
+}
+
+/* Achievements */
+#appSidebar .menu-achievements i {
+    color: #00e676 !important;
+}
+
+/* Corrective Actions */
+#appSidebar .menu-actions i {
+    color: #ff7043 !important;
+}
+
+/* Reports */
+#appSidebar .menu-reports i {
+    color: #64b5f6 !important;
+}
+
+/* Equipment */
+#appSidebar .menu-equipment i {
+    color: #b39ddb !important;
+}
+
+/* Users */
+#appSidebar .menu-users i {
+    color: #26a69a !important;
+}
+
+/* Chat */
+#appSidebar .menu-chat i {
+    color: #ec407a !important;
+}
+
+/* Audit Logs */
+#appSidebar .menu-audit i {
+    color: #b0bec5 !important;
+}
+
+/* User Guide */
+#appSidebar .menu-guide i {
+    color: #ffa726 !important;
+}
+
+/* Generic profile */
+#appSidebar .menu-profile i {
+    color: #90caf9 !important;
+}
+
+/* Generic logout */
+#appSidebar .menu-logout i {
+    color: #ff6b6b !important;
+}
+
+/* ==========================================================
+   NEW REQUEST BUTTON
+   ========================================================== */
+
+#appSidebar .new-request-link {
+    border-color: rgba(118, 230, 162, 0.62);
+    border-left-color: #9af0bc;
+
+    background: var(--sidebar-success);
+
+    color: #ffffff !important;
+
+    font-weight: 800;
+
+    box-shadow: 0 9px 20px rgba(31, 162, 74, 0.30);
+}
+
+#appSidebar .new-request-link:hover,
+#appSidebar .new-request-link:focus,
+#appSidebar .new-request-link.active {
+    border-color: #9af0bc;
+    border-left-color: #ffffff;
+
+    background: var(--sidebar-success-dark);
+
+    color: #ffffff !important;
+
+    transform: translateX(4px);
+}
+
+#appSidebar .new-request-link .menu-icon,
+#appSidebar .new-request-link:hover .menu-icon,
+#appSidebar .new-request-link:focus .menu-icon,
+#appSidebar .new-request-link.active .menu-icon {
+    background: #146c43 !important;
+}
+
+#appSidebar .new-request-link .menu-icon i,
+#appSidebar .new-request-link:hover .menu-icon i,
+#appSidebar .new-request-link:focus .menu-icon i,
+#appSidebar .new-request-link.active .menu-icon i {
+    color: #ffffff !important;
+}
+
+/* ==========================================================
+   BADGES
+   ========================================================== */
+
+#appSidebar .nav-link .badge {
+    margin-left: auto;
+
+    padding: 5px 8px;
+
+    border: 2px solid rgba(255, 255, 255, 0.46);
+    border-radius: 999px;
+
+    font-size: 0.68rem;
+    font-weight: 800;
+}
+
+#appSidebar .nav-link.active .badge {
+    border-color: rgba(11, 45, 92, 0.20);
+}
+
+/* ==========================================================
+   COLLAPSED SIDEBAR
+   ========================================================== */
+
+body.sidebar-collapsed #appSidebar {
+    flex: 0 0 78px;
+    width: 78px;
+    max-width: 78px;
+
+    padding-right: 10px;
+    padding-left: 10px;
+}
+
+body.sidebar-collapsed #appSidebar .sidebar-brand,
+body.sidebar-collapsed #appSidebar .nav-section-title,
+body.sidebar-collapsed #appSidebar .nav-link> :not(.menu-icon):not(.badge) {
+    display: none;
+}
+
+body.sidebar-collapsed #appSidebar .sidebar-logo {
+    justify-content: center;
+
+    padding-right: 6px;
+    padding-left: 6px;
+}
+
+body.sidebar-collapsed #appSidebar .nav-link {
+    justify-content: center;
+
+    padding-right: 8px;
+    padding-left: 8px;
+
+    font-size: 0;
+}
+
+body.sidebar-collapsed #appSidebar .nav-link .badge {
+    position: absolute;
+    top: 2px;
+    right: 1px;
+
+    min-width: 20px;
+}
+
+/* ==========================================================
+   RESPONSIVE
+   ========================================================== */
+
+@media (max-width: 1199.98px) {
+    #appSidebar.sidebar {
+        flex-basis: 240px;
+        width: 240px;
+        max-width: 240px;
+    }
+
+    #appSidebar .nav-link {
+        font-size: 0.84rem;
+    }
+}
+
+@media (max-width: 991.98px) {
+    #appSidebar.sidebar {
+        top: 68px;
+
+        height: calc(100vh - 68px);
+        min-height: calc(100vh - 68px);
+    }
+}
+
+/* ==========================================================
+   ACCESSIBILITY
+   ========================================================== */
+
+#appSidebar .nav-link:focus-visible {
+    outline: 3px solid rgba(242, 183, 5, 0.65);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    #appSidebar *,
+    #appSidebar *::before,
+    #appSidebar *::after {
+        transition: none !important;
+    }
+}
