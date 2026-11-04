@@ -217,36 +217,24 @@
             @endif
         @endcan
 
-@php
-    $pendingQuoteRequests =
-        \App\Models\PublicQuoteRequest::query()
-            ->where(
-                'status',
-                'pending'
-            )
-            ->count();
-@endphp
-
-<a
-    href="{{ route(
-        'admin.quote-requests.index'
-    ) }}"
-    class="nav-link"
->
-    <i class="fas fa-file-invoice-dollar"></i>
-
-    <span>
-        Quote Requests
-    </span>
-
-    @if($pendingQuoteRequests > 0)
-
-        <span class="badge bg-danger ms-auto">
-            {{ $pendingQuoteRequests }}
-        </span>
-
-    @endif
-</a>
+        @if(Route::has('admin.quote-requests.index'))
+            @php
+                $pendingQuoteRequests = \App\Models\PublicQuoteRequest::query()
+                    ->where('status', 'pending')
+                    ->count();
+            @endphp
+            <a href="{{ route('admin.quote-requests.index') }}"
+               class="nav-link {{ request()->routeIs('admin.quote-requests.*') ? 'active' : '' }}"
+               title="Quote Requests">
+                <span class="menu-icon menu-quotes">
+                    <i class="fas fa-file-invoice-dollar"></i>
+                </span>
+                <span>Quote Requests</span>
+                @if($pendingQuoteRequests > 0)
+                    <span class="badge bg-danger ms-auto">{{ $pendingQuoteRequests }}</span>
+                @endif
+            </a>
+        @endif
 
         @can('view_certificates')
             @if(Route::has('certificates.index'))
@@ -398,89 +386,41 @@
         @endif
 
         @can('view_system_documents')
+            @if(Route::has('system-documents.index'))
+                <a href="{{ route('system-documents.index') }}"
+                   class="nav-link {{ request()->routeIs('system-documents.index') ? 'active' : '' }}"
+                   title="System Documentation">
+                    <span class="menu-icon menu-guide">
+                        <i class="fas fa-book-open"></i>
+                    </span>
+                    <span>System Documentation</span>
+                </a>
+            @endif
+        @endcan
 
-    <li class="nav-item">
+        @can('manage_system_documents')
+            @if(Route::has('system-documents.dashboard'))
+                <a href="{{ route('system-documents.dashboard') }}"
+                   class="nav-link {{ request()->routeIs('system-documents.dashboard') ? 'active' : '' }}"
+                   title="Documentation Compliance">
+                    <span class="menu-icon menu-reports">
+                        <i class="fas fa-chart-line"></i>
+                    </span>
+                    <span>Documentation Compliance</span>
+                </a>
+            @endif
 
-        <a href="{{ route('system-documents.index') }}"
-           class="nav-link {{ request()->routeIs('system-documents.*') ? 'active' : '' }}">
-
-            <i class="fas fa-book-open nav-icon"></i>
-
-            <span>
-                System Documentation
-            </span>
-
-        </a>
-
-    </li>
-
-@endcan
-@can('manage_system_documents')
-
-    <li class="nav-item">
-
-        <a href="{{
-            route(
-                'system-documents.dashboard'
-            )
-        }}"
-           class="nav-link
-               {{
-                   request()
-                       ->routeIs(
-                           'system-documents.dashboard'
-                       )
-                       ? 'active'
-                       : ''
-               }}">
-
-            <i class="fas
-                       fa-chart-line
-                       nav-icon">
-            </i>
-
-            <span>
-                Documentation Compliance
-            </span>
-
-        </a>
-
-    </li>
-
-@endcan
-
-@can('manage_system_documents')
-
-    <li class="nav-item">
-
-        <a href="{{
-            route(
-                'system-documents.reports'
-            )
-        }}"
-           class="nav-link
-               {{
-                   request()->routeIs(
-                       'system-documents.reports*'
-                   )
-                   ? 'active'
-                   : ''
-               }}">
-
-            <i class="fas
-                       fa-file-lines
-                       nav-icon">
-            </i>
-
-            <span>
-                Documentation Reports
-            </span>
-
-        </a>
-
-    </li>
-
-@endcan
+            @if(Route::has('system-documents.reports'))
+                <a href="{{ route('system-documents.reports') }}"
+                   class="nav-link {{ request()->routeIs('system-documents.reports*') ? 'active' : '' }}"
+                   title="Documentation Reports">
+                    <span class="menu-icon menu-reports">
+                        <i class="fas fa-file-lines"></i>
+                    </span>
+                    <span>Documentation Reports</span>
+                </a>
+            @endif
+        @endcan
 
         @can('view_equipment')
             @if(Route::has('equipment.index'))

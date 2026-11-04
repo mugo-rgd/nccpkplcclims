@@ -10,20 +10,12 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
+    <link rel="stylesheet" href="{{ asset('css/layout.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/navbar.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/sidebar.css') }}">
 
-{{-- Main application layout --}}
-<link rel="stylesheet" href="{{ asset('css/layout.css') }}">
-
-{{-- Navigation styling --}}
-<link rel="stylesheet" href="{{ asset('css/navbar.css') }}">
-
-{{-- Sidebar styling --}}
-<link rel="stylesheet" href="{{ asset('css/sidebar.css') }}">
-
-{{-- Page-specific styles --}}
-@stack('styles')
+    @stack('styles')
 </head>
-
 <body>
 <div id="app">
     @include('layouts.partials.navbar')
@@ -37,9 +29,7 @@
             <div id="appMainContent"
                  class="col-md-10 main-content"
                  style="{{ auth()->check() ? '' : 'margin-left: auto; margin-right: auto; max-width: 1200px;' }}">
-
                 @include('layouts.partials.alerts')
-
                 @yield('content')
             </div>
         </div>
@@ -47,7 +37,6 @@
 </div>
 
 @include('layouts.partials.scripts')
-
 @stack('scripts')
 </body>
 </html>
