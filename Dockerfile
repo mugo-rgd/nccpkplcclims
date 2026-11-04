@@ -8,11 +8,9 @@ WORKDIR /app
 
 COPY package.json package-lock.json* ./
 
-RUN if [ -f package-lock.json ]; then \
-        npm ci; \
-    else \
-        npm install; \
-    fi
+RUN node --version \
+    && npm --version \
+    && npm ci --no-audit --no-fund --loglevel verbose
 
 COPY resources ./resources
 COPY public ./public
