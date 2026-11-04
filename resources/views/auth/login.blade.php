@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
 
     <title>Sign In | KPLC Meter Laboratory System</title>
 
@@ -696,7 +697,7 @@
         @php
             $videoPath = public_path('videos/music-motional-lab.mp4');
             $videoExists = file_exists($videoPath);
-            $videoUrl = $videoExists ? asset('videos/music-motional-lab.mp4') : 'https://www.w3schools.com/html/mov_bbb.mp4';
+            $videoUrl = $videoExists ? asset('videos/music-motional-lab.mp4') : null;
         @endphp
 
         <video
@@ -710,8 +711,7 @@
             @if($videoExists)
                 <source src="{{ $videoUrl }}" type="video/mp4">
             @endif
-            <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
-            <source src="https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4" type="video/mp4">
+
         </video>
         <div class="overlay"></div>
     </div>
@@ -843,6 +843,7 @@
                     method="POST"
                     action="{{ route('login') }}"
                     novalidate
+                    autocomplete="off"
                 >
                     @csrf
 
@@ -861,7 +862,7 @@
                                 class="form-control @error('email') is-invalid @enderror"
                                 value="{{ old('email') }}"
                                 placeholder="name@example.com"
-                                autocomplete="email"
+                                autocomplete="off"
                                 inputmode="email"
                                 required
                                 autofocus
@@ -887,8 +888,9 @@
                                 name="password"
                                 class="form-control @error('password') is-invalid @enderror"
                                 placeholder="Enter your password"
-                                autocomplete="current-password"
+                                autocomplete="off"
                                 required
+                                spellcheck="false"
                             >
 
                             <button
@@ -978,6 +980,10 @@
             const statusPulse = document.getElementById('statusPulse');
 
             if (video && statusText) {
+                if (!video.querySelector('source')) {
+                    statusText.textContent = 'Background';
+                    if (statusPulse) statusPulse.style.background = '#94a3b8';
+                }
                 video.addEventListener('play', () => {
                     statusText.textContent = 'Playing';
                     statusPulse.style.background = '#22c55e';
@@ -1023,6 +1029,26 @@
                     }
                 });
             }
+
+            // Clear sensitive values when returning to this page through browser history.
+            // Browser password managers can still choose to autofill afterwards.
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted && passwordInput) {
+                    passwordInput.value = '';
+                    passwordInput.type = 'password';
+                    if (togglePassword) {
+                        togglePassword.setAttribute('aria-label', 'Show password');
+                        togglePassword.setAttribute('aria-pressed', 'false');
+                        const icon = togglePassword.querySelector('i');
+                        if (icon) icon.className = 'fa-solid fa-eye';
+                    }
+                    if (loginButton) {
+                        loginButton.disabled = false;
+                        loginButton.querySelector('.button-default')?.classList.remove('d-none');
+                        loginButton.querySelector('.button-loading')?.classList.add('d-none');
+                    }
+                }
+            });
 
             form.addEventListener('submit', (event) => {
                 if (!form.checkValidity()) {
