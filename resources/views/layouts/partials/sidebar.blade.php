@@ -11,7 +11,7 @@
 @endphp
 
 
-<div id="appSidebar" class="col-md-2 sidebar d-none d-md-block">
+<div id="appSidebar" class="sidebar d-none d-md-block">
     <div class="sidebar-logo">
         @if($logoExists)
             <img

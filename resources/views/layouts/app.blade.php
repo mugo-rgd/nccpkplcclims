@@ -23,11 +23,11 @@
     <div class="mobile-sidebar-backdrop" id="mobileSidebarBackdrop"></div>
 
     <div class="container-fluid px-0">
-        <div class="row g-0">
-            @include('layouts.partials.sidebar')
+    <div class="row g-0" id="appLayout">
+        @include('layouts.partials.sidebar')
 
-            <div id="appMainContent"
-                 class="col-md-10 main-content"
+        <div id="appMainContent"
+             class="main-content"
                  style="{{ auth()->check() ? '' : 'margin-left: auto; margin-right: auto; max-width: 1200px;' }}">
                 @include('layouts.partials.alerts')
                 @yield('content')
