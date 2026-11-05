@@ -568,7 +568,7 @@
                         @endif
 
                         @if($currentUser?->can('create_customer') && Route::has('customers.create'))
-                            <a href="{{ route('customers.create') }}" class="btn btn-success">
+                            <a href="{{ route('register') }}" class="btn btn-success">
                                 <i class="fas fa-user-plus me-1"></i>
                                 Add Customer
                             </a>

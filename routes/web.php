@@ -1325,7 +1325,53 @@ Route::match(['put', 'patch'], '/customers/{customer}', [CustomerController::cla
     ->middleware('permission:edit_customers')
     ->name('customers.update');
 
-Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])
+/*
+|--------------------------------------------------------------------------
+| CUSTOMER ACCOUNT APPROVAL
+|--------------------------------------------------------------------------
+| Supervisor and Lab Manager only.
+| Already inside prefix('admin')->name('admin.')
+|--------------------------------------------------------------------------
+*/
+
+Route::middleware('role:supervisor|lab_manager')
+    ->group(function () {
+
+        Route::post(
+            '/customers/{customer}/approve',
+            [CustomerController::class, 'approve']
+        )->name('customers.approve');
+
+        Route::post(
+            '/customers/{customer}/reject',
+            [CustomerController::class, 'reject']
+        )->name('customers.reject');
+    });
+
+
+/*
+|--------------------------------------------------------------------------
+| VAT EXEMPTION APPROVAL
+|--------------------------------------------------------------------------
+| Lab Manager only.
+|--------------------------------------------------------------------------
+*/
+
+Route::middleware('role:lab_manager')
+    ->group(function () {
+
+        Route::post(
+            '/customers/{customer}/vat/approve',
+            [CustomerController::class, 'approveVat']
+        )->name('customers.vat.approve');
+
+        Route::post(
+            '/customers/{customer}/vat/reject',
+            [CustomerController::class, 'rejectVat']
+        )->name('customers.vat.reject');
+    });
+
+    Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])
     ->middleware('permission:delete_customers')
     ->name('customers.destroy');
 

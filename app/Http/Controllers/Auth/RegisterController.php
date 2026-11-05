@@ -28,15 +28,29 @@ class RegisterController extends Controller
     /**
      * Register customer and submit tax documents.
      */
-    public function register(CustomerRegistrationRequest $request)
-    {
-        $validated = $request->validated();
+   public function register(CustomerRegistrationRequest $request)
+{
+    $validated = $request->validated();
 
-        $vatRequested = $request->boolean(
-            'vat_exemption_requested'
-        );
+    /*
+     * Identify who is performing the registration
+     * BEFORE creating the new customer account.
+     */
+    $registrar = Auth::user();
 
-        $uploadedPaths = [];
+    $isStaffRegistration = $registrar !== null
+        && $registrar->hasAnyRole([
+            'super_admin',
+            'lab_manager',
+            'supervisor',
+        ]);
+
+    $vatRequested = $request->boolean(
+        'vat_exemption_requested'
+    );
+
+    $uploadedPaths = [];
+
 
         try {
             DB::beginTransaction();
@@ -244,32 +258,66 @@ class RegisterController extends Controller
                 );
         }
 
-        /*
-         * STEP 5: Fire registration event.
-         */
-        event(new Registered($user));
+      /*
+|--------------------------------------------------------------------------
+| STEP 5: Fire registration event
+|--------------------------------------------------------------------------
+*/
+event(new Registered($user));
 
-        /*
-         * STEP 6: Log in customer.
-         *
-         * Pending customers must be restricted
-         * from approval-dependent activities by
-         * the relevant middleware/policies.
-         */
-        Auth::login($user);
+/*
+|--------------------------------------------------------------------------
+| STEP 6: Determine registration flow
+|--------------------------------------------------------------------------
+|
+| Staff registration:
+|   - Do not log in as the newly created customer.
+|   - Keep the current staff session.
+|   - Redirect to the customer management page.
+|
+| Customer self-registration:
+|   - Log in as the newly created customer.
+|   - Redirect to the customer dashboard.
+|
+*/
 
-        return redirect()
-            ->route('dashboard')
-            ->with(
-                'success',
-                $vatRequested
-                    ? 'Your account has been created. '
-                        . 'Your VAT exemption documents are '
-                        . 'awaiting Lab Manager verification.'
-                    : 'Your account has been created '
-                        . 'successfully and is awaiting approval.'
-            );
-    }
+/*
+ * CASE 1: Registration performed by KPLC staff.
+ */
+if ($isStaffRegistration) {
+
+    return redirect()
+        ->route('admin.customers.index')
+        ->with(
+            'success',
+            $vatRequested
+                ? 'Customer registered successfully. '
+                    . 'VAT exemption documents are pending '
+                    . 'Lab Manager verification.'
+                : 'Customer registered successfully '
+                    . 'and is awaiting account approval.'
+        );
+}
+
+/*
+ * CASE 2: Customer self-registration.
+ */
+Auth::login($user);
+
+$request->session()->regenerate();
+
+return redirect()
+    ->route('dashboard')
+    ->with(
+        'success',
+        $vatRequested
+            ? 'Your account has been created successfully. '
+                . 'Your VAT exemption documents are '
+                . 'awaiting Lab Manager verification.'
+            : 'Your account has been created successfully '
+                . 'and is awaiting approval.'
+    );
+}
 
     /**
      * Authentication guard.

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\CustomerAccountCreated;
 use Illuminate\Support\Str;
+
 class CustomerController extends Controller
 {
     /**
@@ -45,8 +46,10 @@ class CustomerController extends Controller
         // Filter by type (KPLC vs External)
         if ($request->filled('type')) {
             if ($request->type === 'kplc') {
-                $query->where('company_name', 'LIKE', '%KPLC%')
-                    ->orWhere('company_name', 'LIKE', '%Kenya Power%');
+                $query->where(function ($q) {
+                    $q->where('company_name', 'LIKE', '%KPLC%')
+                      ->orWhere('company_name', 'LIKE', '%Kenya Power%');
+                });
             } elseif ($request->type === 'external') {
                 $query->where('company_name', 'NOT LIKE', '%KPLC%')
                     ->where('company_name', 'NOT LIKE', '%Kenya Power%');
@@ -54,7 +57,7 @@ class CustomerController extends Controller
         }
 
         $customers = $query->orderBy('created_at', 'desc')->paginate(15);
-        $statuses = ['active', 'pending', 'suspended'];
+        $statuses = ['active', 'pending', 'suspended', 'rejected'];
 
         return view('admin.customers.index', compact('customers', 'statuses'));
     }
@@ -132,7 +135,7 @@ class CustomerController extends Controller
                 'credit_limit' => $request->credit_limit,
                 'payment_terms' => $request->payment_terms ?? '30_days',
                 'registration_date' => now(),
-                'status' => 'active',
+                'status' => 'pending',
                 'is_active' => true,
                 'notes' => json_encode($notes),
             ]);
@@ -141,7 +144,8 @@ class CustomerController extends Controller
 
             if (
     $user &&
-    !empty($user->email)
+    !empty($user->email) &&
+    isset($tempPassword)
 ) {
     try {
 
@@ -398,24 +402,197 @@ class CustomerController extends Controller
         // ... export logic
     }
 
-    /**
- * Approve a customer registration
- */
-public function approve(Customer $customer)
+    /** Account approval is separate from VAT verification. */
+  public function approve(Request $request, Customer $customer)
 {
-    $customer->update([
-        'status' => 'active',
-        'is_active' => 1,
-        'notes' => array_merge($customer->notes ?? [], [
-            'approved_by' => auth()->user()->name,
-            'approved_at' => now()->format('Y-m-d H:i:s'),
+    /*
+    |--------------------------------------------------------------------------
+    | STEP 1: Authorization
+    |--------------------------------------------------------------------------
+    | Only Supervisor and Lab Manager can approve customer registrations.
+    */
+    abort_unless(
+        auth()->user()?->hasAnyRole([
+            'supervisor',
+            'lab_manager',
         ]),
+        403,
+        'You are not authorized to approve customer registrations.'
+    );
+
+    /*
+    |--------------------------------------------------------------------------
+    | STEP 2: Validate approval form
+    |--------------------------------------------------------------------------
+    */
+    $validated = $request->validate([
+        'approval_notes' => [
+            'nullable',
+            'string',
+            'max:2000',
+        ],
+
+        'approval_confirmed' => [
+            'required',
+            'accepted',
+        ],
     ]);
 
-    // Optionally send email notification
-    // Mail::to($customer->email)->send(new CustomerApproved($customer));
+    /*
+    |--------------------------------------------------------------------------
+    | STEP 3: Verify registration status
+    |--------------------------------------------------------------------------
+    */
+    if ($customer->status !== 'pending') {
+        return back()->with(
+            'error',
+            'Only pending customer registrations can be approved.'
+        );
+    }
 
-    return redirect()->route('admin.customers.index')
-        ->with('success', 'Customer account approved successfully.');
+    /*
+    |--------------------------------------------------------------------------
+    | STEP 4: Approve customer and record audit details
+    |--------------------------------------------------------------------------
+    */
+    DB::transaction(function () use ($customer, $validated) {
+
+        $customer = Customer::query()
+            ->lockForUpdate()
+            ->findOrFail($customer->id);
+
+        if ($customer->status !== 'pending') {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'customer' => 'This customer registration has already been reviewed.',
+            ]);
+        }
+
+        $notes = $customer->notes;
+
+        if (is_string($notes)) {
+            $notes = json_decode($notes, true) ?: [];
+        }
+
+        $notes = is_array($notes) ? $notes : [];
+
+        $notes['account_review'] = [
+            'decision' => 'approved',
+
+            'approval_notes' =>
+                trim($validated['approval_notes'] ?? ''),
+
+            'reviewed_by' => auth()->id(),
+
+            'reviewer_name' => auth()->user()->name,
+
+            'reviewed_at' => now()->toIso8601String(),
+        ];
+
+        $customer->update([
+            'status' => 'active',
+            'is_active' => true,
+            'notes' => $notes,
+        ]);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | STEP 5: Return to customer management
+    |--------------------------------------------------------------------------
+    | VAT approval remains independent of customer account approval.
+    */
+    return redirect()
+        ->route('admin.customers.index')
+        ->with(
+            'success',
+            'Customer account approved successfully. '
+            . 'VAT exemption, if requested, remains pending '
+            . 'separate Lab Manager verification.'
+        );
 }
+
+    public function reject(Request $request, Customer $customer)
+    {
+        abort_unless(auth()->user()?->hasAnyRole(['supervisor', 'lab_manager']), 403);
+        $data = $request->validate(['rejection_reason' => 'required|string|min:10|max:2000']);
+        if ($customer->status !== 'pending') {
+            return back()->with('error', 'Only pending registrations can be rejected.');
+        }
+        DB::transaction(function () use ($customer, $data) {
+            $notes = is_array($customer->notes) ? $customer->notes : [];
+            $notes['account_review'] = [
+                'decision' => 'rejected', 'reason' => $data['rejection_reason'],
+                'reviewed_by' => auth()->id(), 'reviewed_at' => now()->toIso8601String(),
+            ];
+            $customer->update(['status' => 'rejected', 'is_active' => false, 'notes' => $notes]);
+        });
+        return back()->with('success', 'Customer registration rejected.');
+    }
+
+    /** Only a lab manager can verify a requested VAT exemption. */
+    public function approveVat(Request $request, Customer $customer)
+    {
+        abort_unless(auth()->user()?->hasRole('lab_manager'), 403);
+        $data = $request->validate([
+            'approved_vat_rate' => 'required|numeric|between:0,100',
+            'verification_notes' => 'nullable|string|max:2000',
+        ]);
+        if ($customer->vat_exemption_status !== 'pending') {
+            return back()->with('error', 'VAT exemption is not pending review.');
+        }
+        if (!$customer->vat_exemption_certificate_number || !$customer->vat_exemption_expiry_date ||
+            $customer->vat_exemption_expiry_date->isPast()) {
+            return back()->with('error', 'A valid exemption certificate number and unexpired date are required.');
+        }
+        $vatDocument = $customer->taxDocuments()->where('document_type', 'vat_exemption_certificate')->first();
+        if (!$vatDocument || !$vatDocument->file_path) {
+            return back()->with('error', 'VAT exemption certificate upload is missing.');
+        }
+        DB::transaction(function () use ($customer, $vatDocument, $data) {
+            $customer->update([
+                'vat_exemption_status' => 'approved',
+                'is_tax_exempt' => true,
+                'customer_vat_rate' => $data['approved_vat_rate'],
+                'vat_rate' => $data['approved_vat_rate'],
+                'vat_verified_by' => auth()->id(),
+                'vat_verified_at' => now(),
+                'vat_verification_notes' => $data['verification_notes'] ?? null,
+            ]);
+            $vatDocument->update([
+                'verification_status' => 'verified',
+                'verified_by' => auth()->id(),
+                'verified_at' => now(),
+                'verification_notes' => $data['verification_notes'] ?? null,
+            ]);
+        });
+        return back()->with('success', 'VAT exemption verified and approved by Lab Manager.');
+    }
+
+    public function rejectVat(Request $request, Customer $customer)
+    {
+        abort_unless(auth()->user()?->hasRole('lab_manager'), 403);
+        $data = $request->validate(['verification_notes' => 'required|string|min:10|max:2000']);
+        if ($customer->vat_exemption_status !== 'pending') {
+            return back()->with('error', 'VAT exemption is not pending review.');
+        }
+        DB::transaction(function () use ($customer, $data) {
+            $customer->update([
+                'vat_exemption_status' => 'rejected',
+                'is_tax_exempt' => false,
+                'customer_vat_rate' => null,
+                'vat_rate' => null,
+                'vat_verified_by' => auth()->id(),
+                'vat_verified_at' => now(),
+                'vat_verification_notes' => $data['verification_notes'],
+            ]);
+            $customer->taxDocuments()->where('document_type', 'vat_exemption_certificate')
+                ->update([
+                    'verification_status' => 'rejected',
+                    'verified_by' => auth()->id(),
+                    'verified_at' => now(),
+                    'verification_notes' => $data['verification_notes'],
+                ]);
+        });
+        return back()->with('success', 'VAT exemption request rejected. Customer account decision is unchanged.');
+    }
 }
