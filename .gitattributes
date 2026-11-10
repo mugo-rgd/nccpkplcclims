@@ -71,8 +71,3 @@ Dockerfile text eol=lf
 *.html diff=html
 *.md diff=markdown
 *.php diff=php
-
-# Exclude development files from Git archives
-/.github export-ignore
-CHANGELOG.md export-ignore
-.styleci.yml export-ignore

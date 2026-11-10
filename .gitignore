@@ -1,33 +1,79 @@
-*.log
-.DS_Store
+# ==========================================================
+# MCL - Meter Central Laboratory System
+# Git Ignore Configuration
+# Windows Development / Linux Production
+# ==========================================================
+
+# Environment and credentials
 .env
+.env.*
+!.env.example
 .env.example
-.env.backup
-.env.production
-.phpactor.json
+/auth.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Logs
+*.log
+/storage/logs/*
+!/storage/logs/.gitignore
+
+# Laravel compiled views
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+
+# Laravel cache
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+
+# Laravel sessions
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+
+# Laravel testing
 .phpunit.result.cache
+/.phpunit.cache
+
+# Dependencies
+/node_modules
+/vendor
+
+# Frontend generated assets
+/public/build
+/public/hot
+/public/storage
+/public/fonts-manifest.dev.json
+
+# Laravel runtime files
+/storage/*.key
+/storage/pail
+
+# Development tools
 /.codex
 /.cursor/
 /.idea
 /.nova
-/.phpunit.cache
 /.vscode
 /.zed
-/auth.json
-/node_modules
-/public/build
-/public/fonts-manifest.dev.json
-/public/hot
-/public/storage
-/storage/*.key
-/storage/pail
-/vendor
-/Manuals
+.phpactor.json
 _ide_helper.php
-Homestead.json
-Homestead.yaml
+
+# Operating system files
+.DS_Store
 Thumbs.db
 
-/Manuals/Logins.txt
+# Local development
+Homestead.json
+Homestead.yaml
 
-/Manuals/Logins.txt
+# Sensitive manuals and local documentation
+/Manuals/
+
+# Database backups and dumps
+*.sql
+*.sql.gz
+*.bak
+*.backup
+*.dump
