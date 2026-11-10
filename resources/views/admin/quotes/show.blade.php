@@ -3,6 +3,10 @@
 @section('title', 'Quotation #' . ($quote->quote_number ?? $quote->id))
 
 @section('content')
+@php
+    // Resolve the related calibration even when the controller does not pass it separately.
+    $calibration = $calibration ?? $quote->calibration;
+@endphp
 <div class="container-fluid py-4">
     {{-- Flash messages --}}
     @if(session('success'))
@@ -103,6 +107,16 @@
                         Back
                     </a>
 
+                    @can('payments.view')
+                        @if($quote->is_external && Route::has('admin.payments.index'))
+                            <a href="{{ route('admin.payments.index', $quote) }}"
+                               class="btn btn-outline-success">
+                                <i class="fas fa-money-check-alt me-1"></i>
+                                Manage Payments
+                            </a>
+                        @endif
+                    @endcan
+
                     <a
                         href="{{ route('admin.quotes.download', $quote) }}"
                         class="btn btn-primary"
@@ -151,12 +165,12 @@
                                         Phone
                                     </small>
 
-                                    @if($quote->customer?->phone)
+                                    @if(($quote->customer?->company_phone ?: $quote->customer?->phone))
                                         <a
-                                            href="tel:{{ $quote->customer->phone }}"
+                                            href="tel:{{ ($quote->customer->company_phone ?: $quote->customer->phone) }}"
                                             class="text-decoration-none fw-semibold"
                                         >
-                                            {{ $quote->customer->phone }}
+                                            {{ ($quote->customer->company_phone ?: $quote->customer->phone) }}
                                         </a>
                                     @else
                                         <span class="fw-semibold">N/A</span>
@@ -168,12 +182,12 @@
                                         Email
                                     </small>
 
-                                    @if($quote->customer?->email)
+                                    @if(($quote->customer?->company_email ?: $quote->customer?->email))
                                         <a
-                                            href="mailto:{{ $quote->customer->email }}"
+                                            href="mailto:{{ ($quote->customer->company_email ?: $quote->customer->email) }}"
                                             class="text-decoration-none fw-semibold text-break"
                                         >
-                                            {{ $quote->customer->email }}
+                                            {{ ($quote->customer->company_email ?: $quote->customer->email) }}
                                         </a>
                                     @else
                                         <span class="fw-semibold">N/A</span>
@@ -293,13 +307,13 @@
 
 @php
     $equipmentName = $item['equipment_name']
-        ?? $calibration->equipment_name
-        ?? $calibration->equipment?->name
+        ?? $calibration?->equipment_name
+        ?? $calibration?->equipment?->name
         ?? 'N/A';
 
     $serialNumber = $item['serial_number']
-        ?? $calibration->serial_number
-        ?? $calibration->equipment?->serial_number
+        ?? $calibration?->serial_number
+        ?? $calibration?->equipment?->serial_number
         ?? 'N/A';
 
     $description = $item['description']
@@ -373,7 +387,7 @@
 
                     <tfoot class="table-light">
                         <tr>
-                            <td colspan="4" class="text-end">
+                            <td colspan="6" class="text-end">
                                 <strong>Subtotal</strong>
                             </td>
 
@@ -385,7 +399,7 @@
                         </tr>
 
                         <tr>
-                            <td colspan="4" class="text-end">
+                            <td colspan="6" class="text-end">
                                 <strong>
                                     Tax ({{ number_format((float) $quote->tax_rate, 2) }}%)
                                 </strong>
@@ -400,7 +414,7 @@
 
                         @if((float) $quote->discount_amount > 0)
                             <tr>
-                                <td colspan="4" class="text-end">
+                                <td colspan="6" class="text-end">
                                     <strong>Discount</strong>
                                 </td>
 
@@ -413,7 +427,7 @@
                         @endif
 
                         <tr class="table-success">
-                            <td colspan="4" class="text-end fs-5">
+                            <td colspan="6" class="text-end fs-5">
                                 <strong>Total Amount</strong>
                             </td>
 
@@ -424,9 +438,8 @@
                             </td>
                         </tr>
 
-                        @if((float) $quote->amount_paid > 0)
                             <tr>
-                                <td colspan="4" class="text-end">
+                                <td colspan="6" class="text-end">
                                     <strong>Amount Paid</strong>
                                 </td>
 
@@ -438,7 +451,7 @@
                             </tr>
 
                             <tr>
-                                <td colspan="4" class="text-end">
+                                <td colspan="6" class="text-end">
                                     <strong>Balance Due</strong>
                                 </td>
 
@@ -448,7 +461,6 @@
                                     </strong>
                                 </td>
                             </tr>
-                        @endif
                     </tfoot>
                 </table>
             </div>
@@ -525,7 +537,7 @@
                                             <span class="fw-semibold">
                                                 {{
                                                     $calibration->equipment_name
-                                                    ?? $calibration->equipment?->name
+                                                    ?? $calibration?->equipment?->name
                                                     ?? 'N/A'
                                                 }}
                                             </span>
@@ -574,6 +586,7 @@
     $canReplaceQuotation =
         in_array($quote->status, [
             \App\Models\Quote::STATUS_DRAFT,
+            \App\Models\Quote::STATUS_APPROVED,
             \App\Models\Quote::STATUS_SENT,
             \App\Models\Quote::STATUS_REJECTED,
         ], true)
@@ -620,57 +633,122 @@
 @endif
 
 
-            {{-- Approval --}}
-            @can('approve_quotes')
-                @if($quote->canBeApproved())
-                    <div class="mt-4 pt-4 border-top">
-                        <form
-                            action="{{ route('admin.quotes.approve', $quote) }}"
-                            method="POST"
-                            onsubmit="return confirm('Are you sure you want to approve this quotation?');"
-                        >
-                            @csrf
-                            @method('PATCH')
+           
+{{-- Approval and delivery history --}}
+@if($quote->approved_at || $quote->sent_at || $quote->rejected_at)
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-light"><h5 class="mb-0"><i class="fas fa-history me-2"></i>Quotation Decision History</h5></div>
+        <div class="card-body">
+            @if($quote->approved_at)
+                <p class="mb-2"><strong>Approved:</strong> {{ $quote->approved_at->format('d M Y, H:i') }}
+                    @if($quote->approver) by {{ $quote->approver->name }} @endif
+                </p>
+                @if($quote->approval_notes)<p class="text-muted" style="white-space:pre-line">{{ $quote->approval_notes }}</p>@endif
+            @endif
+            @if($quote->sent_at)<p class="mb-2"><strong>Sent:</strong> {{ $quote->sent_at->format('d M Y, H:i') }}</p>@endif
+            @if($quote->rejected_at)
+                <p class="mb-2"><strong>Rejected:</strong> {{ $quote->rejected_at->format('d M Y, H:i') }}</p>
+                <p class="text-danger" style="white-space:pre-line">{{ $quote->rejection_reason }}</p>
+            @endif
+        </div>
+    </div>
+@endif
 
-                            <div class="mb-3">
-                                <label
-                                    for="approval_notes"
-                                    class="form-label"
-                                >
-                                    Approval Notes
-                                    <span class="text-muted">
-                                        (optional)
-                                    </span>
-                                </label>
+@if($quote->isApproved() && $quote->is_external)
+    <div class="alert alert-info mt-4">
+        <i class="fas fa-paper-plane me-2"></i>
+        This quotation has been approved and is ready to be sent to the customer.
+        Use the authorized Send Quotation action on the calibration page.
+        @if($calibration && Route::has('calibrations.show'))
+            <a href="{{ route('calibrations.show', $calibration) }}" class="alert-link">View Calibration</a>
+        @endif
+    </div>
+@endif
 
-                                <textarea
-                                    name="approval_notes"
-                                    id="approval_notes"
-                                    rows="3"
-                                    class="form-control @error('approval_notes') is-invalid @enderror"
-                                    placeholder="Enter approval comments..."
-                                >{{ old('approval_notes') }}</textarea>
+{{-- Quotation Review and Approval --}}
+@php
+    $canReview = auth()->user()?->hasAnyRole([
+        'supervisor',
+        'lab_manager',
+        'super_admin',
+    ]) ?? false;
+@endphp
 
-                                @error('approval_notes')
-                                    <div class="invalid-feedback">
-                                        {{ $message }}
-                                    </div>
-                                @enderror
-                            </div>
+@if($canReview && ($quote->canBeApproved() || $quote->canBeRejected()))
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">
+                <i class="fas fa-clipboard-check me-2"></i>
+                Quotation Review and Decision
+            </h5>
+        </div>
 
-                            <div class="text-end">
-                                <button
-                                    type="submit"
-                                    class="btn btn-success"
-                                >
-                                    <i class="fas fa-check-circle me-1"></i>
-                                    Approve Quotation
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                @endif
-            @endcan
+        <div class="card-body">
+
+            @if($quote->canBeApproved() && !$quote->isExpiredByDate())
+                <form
+                    action="{{ route('admin.quotes.approve', $quote) }}"
+                    method="POST"
+                    class="mb-4"
+                >
+                    @csrf
+                    @method('PATCH')
+
+                    <label for="approval_notes" class="form-label">
+                        Approval Notes (Optional)
+                    </label>
+
+                    <textarea
+                        id="approval_notes"
+                        name="approval_notes"
+                        class="form-control mb-3"
+                        rows="3"
+                        maxlength="2000"
+                    >{{ old('approval_notes') }}</textarea>
+
+                    <button type="submit" class="btn btn-success"
+                        onclick="return confirm('Approve this quotation?')">
+                        <i class="fas fa-check-circle me-1"></i>
+                        Approve Quotation
+                    </button>
+                </form>
+            @endif
+
+            @if($quote->canBeRejected())
+                <form
+                    action="{{ route('admin.quotes.reject', $quote) }}"
+                    method="POST"
+                >
+                    @csrf
+                    @method('PATCH')
+
+                    <label for="rejection_reason" class="form-label">
+                        Rejection Reason
+                        <span class="text-danger">*</span>
+                    </label>
+
+                    <textarea
+                        id="rejection_reason"
+                        name="rejection_reason"
+                        class="form-control mb-3"
+                        rows="3"
+                        minlength="5"
+                        maxlength="2000"
+                        required
+                    >{{ old('rejection_reason') }}</textarea>
+
+                    <button type="submit" class="btn btn-danger"
+                        onclick="return confirm('Reject this quotation?')">
+                        <i class="fas fa-times-circle me-1"></i>
+                        Reject Quotation
+                    </button>
+                </form>
+            @endif
+
+        </div>
+    </div>
+@endif
+
         </div>
     </div>
 </div>

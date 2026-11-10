@@ -56,12 +56,18 @@ class MpesaPaymentController extends Controller
             ]
         );
 
+        $canPay = (bool) $quote->is_external
+    && $quote->canReceivePayment()
+    && !$quote->isExpired()
+    && $outstandingBalance > 0;
+
         return view(
             'payments.mpesa.quote',
             compact(
                 'quote',
                 'outstandingBalance',
-                'initiateUrl'
+                'initiateUrl',
+                'canPay'
             )
         );
     }
@@ -96,6 +102,25 @@ class MpesaPaymentController extends Controller
          * Reload financial values before initiating payment.
          */
         $quote->refresh();
+        $this->validatePaymentEligibility($quote);
+
+$outstandingBalance = round(
+    max(0, (float) $quote->balance_due),
+    2
+);
+
+$requestedAmount = round(
+    (float) $validated['amount'],
+    2
+);
+
+if ($requestedAmount > $outstandingBalance) {
+    throw ValidationException::withMessages([
+        'amount' =>
+            'The payment amount cannot exceed the outstanding balance of KES '
+            . number_format($outstandingBalance, 2) . '.',
+    ]);
+}
 
         try {
             $payment =
@@ -114,6 +139,7 @@ class MpesaPaymentController extends Controller
                     'token' => $quote->payment_token,
                 ]
             );
+            
 
             return response()->json([
                 'success' => true,
@@ -238,4 +264,39 @@ class MpesaPaymentController extends Controller
             'This quote payment link is invalid.'
         );
     }
+    /**
+ * Verify that a quotation is eligible for customer payment.
+ */
+private function validatePaymentEligibility(Quote $quote): void
+{
+    if (!$quote->is_external) {
+        throw ValidationException::withMessages([
+            'quotation' =>
+                'Internal KPLC quotations cannot receive customer payments.',
+        ]);
+    }
+
+    if (!$quote->canReceivePayment()) {
+        throw ValidationException::withMessages([
+            'quotation' =>
+                'This quotation is not available for payment. '
+                . 'It must be approved and sent to the customer first.',
+        ]);
+    }
+
+    if ($quote->isExpired()) {
+        throw ValidationException::withMessages([
+            'quotation' =>
+                'This quotation has expired. '
+                . 'Please request a new quotation.',
+        ]);
+    }
+
+    if ((float) $quote->balance_due <= 0) {
+        throw ValidationException::withMessages([
+            'quotation' =>
+                'This quotation has no outstanding balance.',
+        ]);
+    }
+}
 }

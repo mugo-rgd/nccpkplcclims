@@ -236,6 +236,22 @@
             </a>
         @endif
 
+        {{-- Finance / Accounts payment management --}}
+        @can('payments.view')
+            @if(Route::has('admin.payments.dashboard'))
+                <a
+                    class="nav-link {{ request()->routeIs('admin.payments.*') ? 'active' : '' }}"
+                    href="{{ route('admin.payments.dashboard') }}"
+                    title="Payments"
+                >
+                    <span class="menu-icon menu-payments">
+                        <i class="fas fa-money-check-alt"></i>
+                    </span>
+                    Payments
+                </a>
+            @endif
+        @endcan
+
         @can('view_certificates')
             @if(Route::has('certificates.index'))
                 <a

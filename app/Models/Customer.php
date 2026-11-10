@@ -50,7 +50,7 @@ class Customer extends Model
 'vat_verified_at' => 'datetime',
     ];
 
-    /**
+        /**
      * Get the user associated with this customer
      */
     public function user()
@@ -281,9 +281,9 @@ class Customer extends Model
             if (empty($customer->status)) {
                 $customer->status = 'pending';
             }
-            if (empty($customer->is_active)) {
-                $customer->is_active = true;
-            }
+          if ($customer->is_active === null) {
+    $customer->is_active = false;
+}
         });
     }
 

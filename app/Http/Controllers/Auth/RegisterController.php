@@ -8,82 +8,136 @@ use App\Models\Customer;
 use App\Models\CustomerTaxDocument;
 use App\Models\User;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\View\View;
+use RuntimeException;
 use Throwable;
 
 class RegisterController extends Controller
 {
-    /**
-     * Display customer registration form.
-     */
-    public function showRegistrationForm()
+    /*
+    |--------------------------------------------------------------------------
+    | Authorized Customer Registrars
+    |--------------------------------------------------------------------------
+    |
+    | Guests may register themselves.
+    | Only these authenticated staff roles may register
+    | customers on behalf of another person.
+    |
+    */
+
+    private const STAFF_ROLES = [
+        'super_admin',
+        'lab_manager',
+        'supervisor',
+    ];
+
+    private const DOCUMENT_DISK = 'local';
+
+    /*
+    |--------------------------------------------------------------------------
+    | Display Registration Form
+    |--------------------------------------------------------------------------
+    */
+
+    public function showRegistrationForm(): View
     {
+        $this->authorizeRegistrar();
+
         return view('auth.register');
     }
 
-    /**
-     * Register customer and submit tax documents.
-     */
-   public function register(CustomerRegistrationRequest $request)
-{
-    $validated = $request->validated();
-
     /*
-     * Identify who is performing the registration
-     * BEFORE creating the new customer account.
-     */
-    $registrar = Auth::user();
+    |--------------------------------------------------------------------------
+    | Register Customer
+    |--------------------------------------------------------------------------
+    */
 
-    $isStaffRegistration = $registrar !== null
-        && $registrar->hasAnyRole([
-            'super_admin',
-            'lab_manager',
-            'supervisor',
-        ]);
+    public function register(
+        CustomerRegistrationRequest $request
+    ): RedirectResponse {
 
-    $vatRequested = $request->boolean(
-        'vat_exemption_requested'
-    );
+        /*
+        |--------------------------------------------------------------------------
+        | STEP 1: Identify and authorize registrar
+        |--------------------------------------------------------------------------
+        */
 
-    $uploadedPaths = [];
+        $isStaffRegistration = $this->authorizeRegistrar();
 
+        $registrarId = Auth::id();
+
+        $validated = $request->validated();
+
+        $vatRequested = $request->boolean(
+            'vat_exemption_requested'
+        );
+
+        /*
+         * Track stored files so they can be removed
+         * if database creation fails.
+         */
+        $uploadedPaths = [];
+
+        $user = null;
 
         try {
+
             DB::beginTransaction();
 
             /*
-             * STEP 1: Create customer user.
-             */
+            |--------------------------------------------------------------------------
+            | STEP 2: Create customer user account
+            |--------------------------------------------------------------------------
+            |
+            | New customer accounts remain inactive
+            | until approved by authorized KPLC staff.
+            |
+            */
+
             $user = User::create([
                 'name' => $validated['name'],
+
                 'email' => $validated['email'],
-                'phone_number' => $validated['phone_number'],
+
+                'phone_number' =>
+                    $validated['phone_number'],
+
                 'password' => Hash::make(
                     $validated['password']
                 ),
+
                 'role' => 'customer',
-                'is_active' => true,
+
+                'is_active' => false,
+
                 'status' => true,
+
                 'designation' => 'Customer',
+
                 'department' => 'Customer',
             ]);
 
             /*
-             * Assign Spatie role.
-             * The customer role must exist in roles table.
+             * Assign Spatie customer role.
              */
             $user->assignRole('customer');
 
             /*
-             * STEP 2: Create customer record.
-             *
-             * Customer account approval and VAT
-             * verification are independent processes.
-             */
+            |--------------------------------------------------------------------------
+            | STEP 3: Create customer profile
+            |--------------------------------------------------------------------------
+            |
+            | Account approval and VAT verification
+            | are separate workflows.
+            |
+            */
+
             $customer = Customer::create([
                 'user_id' => $user->id,
 
@@ -98,25 +152,36 @@ class RegisterController extends Controller
 
                 'email' =>
                     $validated['company_email']
-                    ?? $validated['email'],
+                    ?: $validated['email'],
 
                 'address' =>
                     $validated['address'],
 
-                // Existing tax_id stores KRA PIN.
+                /*
+                 * Existing tax_id stores KRA PIN.
+                 */
                 'tax_id' =>
                     $validated['tax_id'],
 
                 'payment_terms' => '30_days',
+
                 'registration_date' => now(),
 
-                // Await customer account approval.
+                /*
+                 * Await account approval.
+                 */
                 'status' => 'pending',
-                'is_active' => true,
 
-                // Customer cannot approve their VAT.
+                'is_active' => false,
+
+                /*
+                 * VAT exemption is not automatically
+                 * approved during registration.
+                 */
                 'vat_exemption_status' =>
-                    $vatRequested ? 'pending' : 'none',
+                    $vatRequested
+                        ? 'pending'
+                        : 'none',
 
                 'customer_vat_rate' => null,
 
@@ -135,111 +200,115 @@ class RegisterController extends Controller
                         : null,
 
                 'vat_verified_by' => null,
+
                 'vat_verified_at' => null,
+
                 'vat_verification_notes' => null,
 
+                /*
+                 * Registration audit information.
+                 *
+                 * Customer model must cast notes
+                 * to array.
+                 */
                 'notes' => [
-                    'created_by' => 'Self Registration',
-                    'created_at' => now()->toDateTimeString(),
+                    'registration_source' =>
+                        $isStaffRegistration
+                            ? 'staff_registration'
+                            : 'self_registration',
+
+                    'created_by_user_id' =>
+                        $isStaffRegistration
+                            ? $registrarId
+                            : null,
+
+                    'created_at' =>
+                        now()->toDateTimeString(),
+
                     'customer_type' => 'external',
-                    'registration_ip' => $request->ip(),
+
+                    'registration_ip' =>
+                        $request->ip(),
                 ],
             ]);
 
             /*
-             * STEP 3: Store KRA PIN certificate.
-             *
-             * Store privately, not on public disk.
-             */
-            $kraFile = $request->file(
-                'kra_pin_certificate'
+            |--------------------------------------------------------------------------
+            | STEP 4: Store mandatory KRA PIN certificate
+            |--------------------------------------------------------------------------
+            */
+
+            $this->storeTaxDocument(
+                request: $request,
+                customer: $customer,
+                user: $user,
+                documentType: 'kra_pin_certificate',
+                uploadedPaths: $uploadedPaths
             );
-
-            $kraPath = $kraFile->store(
-                "customer-tax-documents/{$customer->id}",
-                'local'
-            );
-
-            if (!$kraPath) {
-                throw new \RuntimeException(
-                    'Unable to store KRA PIN certificate.'
-                );
-            }
-
-            $uploadedPaths[] = $kraPath;
-
-            CustomerTaxDocument::create([
-                'customer_id' => $customer->id,
-                'document_type' => 'kra_pin_certificate',
-                'file_path' => $kraPath,
-                'original_filename' =>
-                    $kraFile->getClientOriginalName(),
-                'mime_type' => $kraFile->getMimeType(),
-                'file_size' => $kraFile->getSize(),
-                'verification_status' => 'pending',
-                'uploaded_by' => $user->id,
-                'verified_by' => null,
-                'verified_at' => null,
-                'verification_notes' => null,
-            ]);
 
             /*
-             * STEP 4: Store VAT exemption certificate
-             * only if exemption was requested.
-             */
+            |--------------------------------------------------------------------------
+            | STEP 5: Store VAT exemption certificate
+            |--------------------------------------------------------------------------
+            |
+            | Required only when VAT exemption
+            | has been requested.
+            |
+            */
+
             if ($vatRequested) {
-                $vatFile = $request->file(
-                    'vat_exemption_certificate'
+
+                $this->storeTaxDocument(
+                    request: $request,
+                    customer: $customer,
+                    user: $user,
+                    documentType: 'vat_exemption_certificate',
+                    uploadedPaths: $uploadedPaths
                 );
-
-                $vatPath = $vatFile->store(
-                    "customer-tax-documents/{$customer->id}",
-                    'local'
-                );
-
-                if (!$vatPath) {
-                    throw new \RuntimeException(
-                        'Unable to store VAT exemption certificate.'
-                    );
-                }
-
-                $uploadedPaths[] = $vatPath;
-
-                CustomerTaxDocument::create([
-                    'customer_id' => $customer->id,
-                    'document_type' =>
-                        'vat_exemption_certificate',
-                    'file_path' => $vatPath,
-                    'original_filename' =>
-                        $vatFile->getClientOriginalName(),
-                    'mime_type' => $vatFile->getMimeType(),
-                    'file_size' => $vatFile->getSize(),
-                    'verification_status' => 'pending',
-                    'uploaded_by' => $user->id,
-                    'verified_by' => null,
-                    'verified_at' => null,
-                    'verification_notes' => null,
-                ]);
             }
+
+            /*
+            |--------------------------------------------------------------------------
+            | STEP 6: Commit registration
+            |--------------------------------------------------------------------------
+            */
 
             DB::commit();
 
         } catch (Throwable $e) {
-            DB::rollBack();
+
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
 
             /*
-             * File storage is outside DB transactions.
-             * Clean up files if registration fails.
+             * Remove uploaded documents if the
+             * registration transaction fails.
              */
             foreach ($uploadedPaths as $path) {
-                Storage::disk('local')->delete($path);
+
+                try {
+                    Storage::disk(
+                        self::DOCUMENT_DISK
+                    )->delete($path);
+
+                } catch (Throwable $cleanupException) {
+
+                    Log::warning(
+                        'Unable to clean up customer tax document',
+                        [
+                            'path' => $path,
+                            'exception' => $cleanupException,
+                        ]
+                    );
+                }
             }
 
             Log::error(
                 'Customer registration failed',
                 [
                     'email' => $request->input('email'),
-                    'error' => $e->getMessage(),
+                    'exception' => $e,
                 ]
             );
 
@@ -254,76 +323,227 @@ class RegisterController extends Controller
                 )
                 ->with(
                     'error',
-                    'Registration failed. Please try again.'
+                    'Customer registration failed. '
+                    . 'Please try again or contact '
+                    . 'the system administrator.'
                 );
         }
 
-      /*
-|--------------------------------------------------------------------------
-| STEP 5: Fire registration event
-|--------------------------------------------------------------------------
-*/
-event(new Registered($user));
+        /*
+        |--------------------------------------------------------------------------
+        | STEP 7: Dispatch registration event
+        |--------------------------------------------------------------------------
+        |
+        | Registration has already been committed.
+        | Event listener failures should not cause
+        | duplicate customer registrations.
+        |
+        */
 
-/*
-|--------------------------------------------------------------------------
-| STEP 6: Determine registration flow
-|--------------------------------------------------------------------------
-|
-| Staff registration:
-|   - Do not log in as the newly created customer.
-|   - Keep the current staff session.
-|   - Redirect to the customer management page.
-|
-| Customer self-registration:
-|   - Log in as the newly created customer.
-|   - Redirect to the customer dashboard.
-|
-*/
+        try {
 
-/*
- * CASE 1: Registration performed by KPLC staff.
- */
-if ($isStaffRegistration) {
+            event(new Registered($user));
 
-    return redirect()
-        ->route('admin.customers.index')
-        ->with(
-            'success',
-            $vatRequested
-                ? 'Customer registered successfully. '
-                    . 'VAT exemption documents are pending '
-                    . 'Lab Manager verification.'
-                : 'Customer registered successfully '
-                    . 'and is awaiting account approval.'
+        } catch (Throwable $e) {
+
+            Log::error(
+                'Customer registration event failed',
+                [
+                    'user_id' => $user->id,
+                    'exception' => $e,
+                ]
+            );
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | STEP 8: Staff registration
+        |--------------------------------------------------------------------------
+        |
+        | Preserve the existing staff session.
+        | Never authenticate as the new customer.
+        |
+        */
+
+        if ($isStaffRegistration) {
+
+            $message =
+                'Customer registered successfully. '
+                . 'The account is awaiting approval.';
+
+            if ($vatRequested) {
+
+                $message .=
+                    ' VAT exemption documents are '
+                    . 'awaiting Lab Manager verification.';
+            }
+
+            return redirect()
+                ->route('admin.customers.index')
+                ->with('success', $message);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | STEP 9: Public self-registration
+        |--------------------------------------------------------------------------
+        |
+        | Do not automatically log in the customer.
+        | Account activation requires approval.
+        |
+        */
+
+        $message =
+            'Registration submitted successfully. '
+            . 'Your account is awaiting approval '
+            . 'by the Meter Calibration Laboratory.';
+
+        if ($vatRequested) {
+
+            $message .=
+                ' Your VAT exemption documents '
+                . 'will be reviewed separately.';
+        }
+
+        return redirect()
+            ->route('login')
+            ->with('success', $message);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Store Customer Tax Document
+    |--------------------------------------------------------------------------
+    |
+    | Files are stored privately on the local disk.
+    | File metadata is recorded in the database.
+    |
+    */
+
+    private function storeTaxDocument(
+        CustomerRegistrationRequest $request,
+        Customer $customer,
+        User $user,
+        string $documentType,
+        array &$uploadedPaths
+    ): void {
+
+        /*
+         * Confirm that the uploaded file exists.
+         */
+        if (!$request->hasFile($documentType)) {
+
+            throw new RuntimeException(
+                "Missing required document: {$documentType}"
+            );
+        }
+
+        $file = $request->file($documentType);
+
+        /*
+         * Confirm that the upload is valid.
+         */
+        if (!$file || !$file->isValid()) {
+
+            throw new RuntimeException(
+                "Invalid uploaded document: {$documentType}"
+            );
+        }
+
+        /*
+         * Store document in customer-specific
+         * private directory.
+         */
+        $directory =
+            "customer-tax-documents/{$customer->id}";
+
+        $path = $file->store(
+            $directory,
+            self::DOCUMENT_DISK
         );
-}
 
-/*
- * CASE 2: Customer self-registration.
- */
-Auth::login($user);
+        if ($path === false) {
 
-$request->session()->regenerate();
+            throw new RuntimeException(
+                "Unable to store document: {$documentType}"
+            );
+        }
 
-return redirect()
-    ->route('dashboard')
-    ->with(
-        'success',
-        $vatRequested
-            ? 'Your account has been created successfully. '
-                . 'Your VAT exemption documents are '
-                . 'awaiting Lab Manager verification.'
-            : 'Your account has been created successfully '
-                . 'and is awaiting approval.'
-    );
-}
+        /*
+         * Track file for rollback cleanup.
+         */
+        $uploadedPaths[] = $path;
 
-    /**
-     * Authentication guard.
-     */
-    protected function guard()
+        /*
+         * Save document metadata.
+         */
+        CustomerTaxDocument::create([
+            'customer_id' => $customer->id,
+
+            'document_type' => $documentType,
+
+            'file_path' => $path,
+
+            'original_filename' =>
+                $file->getClientOriginalName(),
+
+            'mime_type' =>
+                $file->getMimeType(),
+
+            'file_size' =>
+                $file->getSize(),
+
+            'verification_status' => 'pending',
+
+            'uploaded_by' => $user->id,
+
+            'verified_by' => null,
+
+            'verified_at' => null,
+
+            'verification_notes' => null,
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authorize Customer Registrar
+    |--------------------------------------------------------------------------
+    |
+    | Guests:
+    |   Allowed to self-register.
+    |
+    | Authorized KPLC staff:
+    |   Allowed to register customers.
+    |
+    | Other authenticated users:
+    |   Forbidden.
+    |
+    */
+
+    private function authorizeRegistrar(): bool
     {
-        return Auth::guard();
+        $registrar = Auth::user();
+
+        /*
+         * Guest self-registration.
+         */
+        if ($registrar === null) {
+            return false;
+        }
+
+        /*
+         * Only authorized staff may create
+         * customer accounts while authenticated.
+         */
+        abort_unless(
+            $registrar->hasAnyRole(
+                self::STAFF_ROLES
+            ),
+            403,
+            'You are not authorized to register customers.'
+        );
+
+        return true;
     }
 }

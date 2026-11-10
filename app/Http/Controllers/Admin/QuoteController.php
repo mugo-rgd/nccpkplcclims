@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Calibration;
 use App\Models\Customer;
 use App\Models\Quote;
 use App\Services\DocumentGenerationService;
@@ -15,6 +16,8 @@ use Illuminate\View\View;
 use App\Services\CustomerVatService;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use App\Services\QuotationNumberService;
+
 
 class QuoteController extends Controller
 {
@@ -50,36 +53,52 @@ class QuoteController extends Controller
 
 
 
+
+
 public function cancelAndReplace(
     Request $request,
     Quote $quote,
     CustomerVatService $vatService
 ): RedirectResponse {
+    /*
+    |--------------------------------------------------------------------------
+    | 1. Authorization
+    |--------------------------------------------------------------------------
+    */
     abort_unless(
         $request->user()?->hasAnyRole([
             'super_admin',
             'lab_manager',
         ]),
-        403
+        403,
+        'You are not authorized to cancel and replace quotations.'
     );
 
     $replacement = DB::transaction(function () use (
+        $request,
         $quote,
-        $vatService,
-        $request
-    ) {
+        $vatService
+    ): Quote {
+
+        /*
+        |--------------------------------------------------------------------------
+        | 2. Lock and validate original quotation
+        |--------------------------------------------------------------------------
+        */
         $old = Quote::query()
+            ->whereKey($quote->id)
             ->lockForUpdate()
-            ->findOrFail($quote->id);
+            ->firstOrFail();
 
         if (!in_array($old->status, [
             Quote::STATUS_DRAFT,
+            Quote::STATUS_APPROVED,
             Quote::STATUS_SENT,
             Quote::STATUS_REJECTED,
         ], true)) {
             throw ValidationException::withMessages([
                 'quotation' =>
-                    'Only draft, sent or rejected quotations can be replaced.',
+                    'Only draft, approved, sent or rejected quotations can be cancelled and replaced.',
             ]);
         }
 
@@ -94,34 +113,126 @@ public function cancelAndReplace(
             ]);
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 3. Protect quotations with payment activity
+        |--------------------------------------------------------------------------
+        */
         if (
-            (float) $old->amount_paid > 0 ||
-            $old->mpesaPayments()->exists()
+            (float) ($old->amount_paid ?? 0) > 0
+            || $old->mpesaPayments()->exists()
+            || $old->paid_at !== null
+            || in_array((string) $old->mpesa_payment_status, [
+                'paid',
+                'partially_paid',
+            ], true)
         ) {
             throw ValidationException::withMessages([
                 'quotation' =>
-                    'This quotation has payment activity. Finance must reconcile it before replacement.',
+                    'This quotation has recorded payment activity. '
+                    . 'Finance must reconcile the payments before replacement.',
             ]);
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | 4. Validate original quotation items
+        |--------------------------------------------------------------------------
+        */
         $items = $old->items_data;
 
         if (empty($items)) {
             throw ValidationException::withMessages([
                 'quotation' =>
-                    'The original quotation has no saved items.',
+                    'The original quotation has no saved items. '
+                    . 'A replacement cannot be generated.',
             ]);
         }
 
-        $customer = $old->customer;
+        /*
+        |--------------------------------------------------------------------------
+        | 5. Lock calibration and verify latest quotation
+        |--------------------------------------------------------------------------
+        */
+        $calibration = null;
+
+        if ($old->calibration_id) {
+
+            $calibration = Calibration::query()
+                ->whereKey($old->calibration_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Prevent replacing an outdated quotation.
+            $latestQuote = Quote::query()
+                ->where('calibration_id', $calibration->id)
+                ->where('status', '!=', Quote::STATUS_CANCELLED)
+                ->orderByDesc('id')
+                ->first();
+
+            if (
+                $latestQuote !== null
+                && (int) $latestQuote->id !== (int) $old->id
+            ) {
+                throw ValidationException::withMessages([
+                    'quotation' =>
+                        'This quotation is not the latest active quotation '
+                        . 'for this calibration. Please open the current quotation.',
+                ]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | Check calibration payment activity
+            |--------------------------------------------------------------------------
+            */
+            if (
+                (float) ($calibration->amount_paid ?? 0) > 0
+                || $calibration->payment_received_at !== null
+                || $calibration->payment_date !== null
+                || $calibration->payment_status === 'paid'
+            ) {
+                throw ValidationException::withMessages([
+                    'quotation' =>
+                        'This calibration has recorded payment activity. '
+                        . 'Finance must reconcile the payments before replacement.',
+                ]);
+            }
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 6. Lock customer and obtain current approved VAT rate
+        |--------------------------------------------------------------------------
+        */
+        $customer = Customer::query()
+            ->whereKey($old->customer_id)
+            ->lockForUpdate()
+            ->first();
 
         if (!$customer) {
             throw ValidationException::withMessages([
                 'quotation' =>
-                    'The quotation has no linked customer.',
+                    'The quotation has no valid linked customer.',
             ]);
         }
 
+        $taxRate = round(
+            max(
+                0,
+                min(
+                    100,
+                    (float) $vatService->rate($customer)
+                )
+            ),
+            2
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | 7. Replicate original quotation
+        |--------------------------------------------------------------------------
+        */
         $new = $old->replicate([
             'quote_number',
             'quote_reference',
@@ -141,75 +252,202 @@ public function cancelAndReplace(
             'payment_token',
             'mpesa_payment_status',
             'pdf_path',
+            'metadata',
             'created_at',
             'updated_at',
+            'deleted_at',
         ]);
 
-        // $new->quote_number =
-        //     'QT-REP-' . $old->id . '-'
-        //     . strtoupper(Str::random(10));
-
-$new->quote_number = $this->generateQuoteNumber($customer);
+        /*
+        |--------------------------------------------------------------------------
+        | 8. Generate new sequential quotation number
+        |--------------------------------------------------------------------------
+        |
+        | Must remain inside the database transaction.
+        | QuotationNumberService handles prefix-based sequencing
+        | and locks the quotation numbering record.
+        |
+        */
+        $new->quote_number = app(
+            QuotationNumberService::class
+        )->generate($customer);
 
         $new->quote_reference =
             'REF-' . strtoupper(Str::random(12));
 
-        $new->items = $items;
-        $new->status = Quote::STATUS_DRAFT;
+        /*
+        |--------------------------------------------------------------------------
+        | 9. Set replacement quotation details
+        |--------------------------------------------------------------------------
+        */
+        $new->customer_id = $customer->id;
+        $new->calibration_id = $old->calibration_id;
         $new->created_by = $request->user()->id;
 
-        $new->tax_rate = $vatService->rate($customer);
+        $new->items = $items;
 
+        $new->status = Quote::STATUS_DRAFT;
+
+        $new->tax_rate = $taxRate;
+
+        // Preserve the original discount percentage.
+        $new->discount_percentage =
+            (float) ($old->discount_percentage ?? 0);
+
+        // Recalculate the discount from the percentage.
+        $new->discount_amount = 0;
+
+        // Totals will be recalculated after saving.
+        $new->subtotal = 0;
+        $new->tax_amount = 0;
+        $new->total_amount = 0;
+
+        /*
+        |--------------------------------------------------------------------------
+        | 10. Reset payment information
+        |--------------------------------------------------------------------------
+        */
         $new->amount_paid = 0;
         $new->balance_due = 0;
+
         $new->paid_at = null;
         $new->payment_method = null;
         $new->payment_reference = null;
+        $new->payment_due_date = null;
+
         $new->payment_token = Str::random(64);
         $new->mpesa_payment_status = 'unpaid';
+
+        /*
+        |--------------------------------------------------------------------------
+        | 11. Reset approval and document information
+        |--------------------------------------------------------------------------
+        */
+        $new->sent_at = null;
+        $new->approved_at = null;
+        $new->approved_by = null;
+        $new->approval_notes = null;
+
+        $new->rejected_at = null;
+        $new->rejection_reason = null;
+        $new->expired_at = null;
+
         $new->pdf_path = null;
 
         $new->valid_until = today()->addDays(30);
 
-        $new->metadata = array_merge(
-            $oldMetadata,
-            [
-                'replaces_quote_id' => $old->id,
-                'replacement_reason' =>
-                    'Replacement following cancellation',
-                'replacement_created_at' =>
-                    now()->toIso8601String(),
-            ]
-        );
+        /*
+        |--------------------------------------------------------------------------
+        | 12. Record replacement history
+        |--------------------------------------------------------------------------
+        */
+        $new->metadata = [
+            'replaces_quote_id' => $old->id,
+            'original_quote_number' => $old->quote_number,
+            'replacement_reason' =>
+                'Replacement following cancellation',
+            'replacement_created_at' =>
+                now()->toIso8601String(),
+            'replacement_created_by' =>
+                $request->user()->id,
+        ];
 
+        /*
+        |--------------------------------------------------------------------------
+        | 13. Save replacement quotation
+        |--------------------------------------------------------------------------
+        */
         $new->save();
 
-        // Recalculate using the saved item prices
-        // and the newly approved customer VAT rate.
+        /*
+        |--------------------------------------------------------------------------
+        | 14. Recalculate quotation totals
+        |--------------------------------------------------------------------------
+        |
+        | Uses the saved item prices, percentage discount,
+        | approved VAT rate, and onsite costs.
+        |
+        */
         $new->updateTotals();
 
-        // Preserve original financial figures and PDF.
+        /*
+        |--------------------------------------------------------------------------
+        | 15. Synchronize calibration financial information
+        |--------------------------------------------------------------------------
+        */
+        if ($calibration !== null) {
+
+            $isExternal = (bool) $new->is_external;
+
+            $calibration->update([
+                'amount_due' => $isExternal
+                    ? (float) $new->total_amount
+                    : 0,
+
+                'amount_paid' => 0,
+
+                'requires_payment' => $isExternal,
+
+                'payment_status' => $isExternal
+                    ? 'pending'
+                    : null,
+            ]);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | 16. Cancel original quotation
+        |--------------------------------------------------------------------------
+        |
+        | Keep the original quotation, its financial figures,
+        | its items and its PDF unchanged.
+        |
+        */
         $oldMetadata['replaced_by_quote_id'] = $new->id;
+
+        $oldMetadata['replacement_quote_number'] =
+            $new->quote_number;
+
         $oldMetadata['cancelled_by'] =
             $request->user()->id;
+
         $oldMetadata['cancelled_at'] =
             now()->toIso8601String();
 
+        $oldMetadata['cancellation_reason'] =
+            'Cancelled and replaced by a new quotation.';
+
         $old->status = Quote::STATUS_CANCELLED;
         $old->metadata = $oldMetadata;
+
         $old->save();
 
+        /*
+        |--------------------------------------------------------------------------
+        | 17. Return replacement quotation
+        |--------------------------------------------------------------------------
+        */
         return $new;
-    });
 
+    }, 3);
+
+    /*
+    |--------------------------------------------------------------------------
+    | 18. Redirect to replacement quotation
+    |--------------------------------------------------------------------------
+    */
     return redirect()
         ->route('admin.quotes.show', $replacement)
         ->with(
             'success',
-            'Quotation cancelled and replacement draft created successfully.'
+            'Quotation '
+            . $quote->quote_number
+            . ' was cancelled successfully. '
+            . 'Replacement quotation '
+            . $replacement->quote_number
+            . ' has been created as a draft.'
         );
 }
-
 
     /**
      * Download the quotation PDF.
@@ -415,70 +653,141 @@ private function getCustomerInitials(
         : 'CUS';
 }
 
-    /**
-     * Approve a sent quotation.
-     */
-    public function approve(
-        Request $request,
-        Quote $quote
-    ): RedirectResponse {
-        if ($quote->isApproved()) {
-            return back()->with(
-                'info',
-                'This quotation has already been approved.'
-            );
+ /**
+ * Approve a quotation.
+ */
+public function approve(
+    Request $request,
+    Quote $quote
+): RedirectResponse {
+    abort_unless(
+        $request->user()?->hasAnyRole([
+            'supervisor',
+            'lab_manager',
+            'super_admin',
+        ]),
+        403
+    );
+
+    $validated = $request->validate([
+        'approval_notes' => [
+            'nullable',
+            'string',
+            'max:2000',
+        ],
+    ]);
+
+    DB::transaction(function () use (
+        $quote,
+        $request,
+        $validated
+    ): void {
+        $lockedQuote = Quote::query()
+            ->whereKey($quote->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+    if (!$lockedQuote->canBeApproved()) {
+            throw ValidationException::withMessages([
+                'quotation' =>
+                    'Only valid draft quotations can be approved.',
+            ]);
         }
 
-        if (!$quote->canBeApproved()) {
-            return back()->with(
-                'error',
-                'Only a sent quotation can be approved.'
-            );
+        if ($lockedQuote->isExpiredByDate()) {
+            throw ValidationException::withMessages([
+                'quotation' =>
+                    'This quotation has expired and cannot be approved.',
+            ]);
         }
 
-        $validated = $request->validate([
-            'approval_notes' => [
-                'nullable',
-                'string',
-                'max:2000',
-            ],
-        ]);
+        if (
+            (float) ($lockedQuote->amount_paid ?? 0) > 0
+            || $lockedQuote->mpesaPayments()->exists()
+            || $lockedQuote->paid_at !== null
+        ) {
+            throw ValidationException::withMessages([
+                'quotation' =>
+                    'A draft quotation with payment activity cannot be approved.',
+            ]);
+        }
 
-        DB::transaction(
-            function () use (
-                $quote,
-                $validated
-            ): void {
-                $quote->markAsApproved(
-                    auth()->id(),
-                    $validated['approval_notes']
-                        ?? null
-                );
-
-                $quote->loadMissing(
-                    'calibration'
-                );
-
-                if ($quote->calibration) {
-                    $quote->calibration->update([
-                        'status' =>
-                            'quoted',
-
-                        'quote_accepted_at' =>
-                            now(),
-                    ]);
-                }
-            }
+        $lockedQuote->markAsApproved(
+            $request->user()->id,
+            $validated['approval_notes'] ?? null
         );
+    }, 3);
 
-        return redirect()
-            ->route(
-                'admin.quotes.show',
-                $quote
-            )
-            ->with(
-                'success',
-                'Quotation approved successfully.'
-            );
-    }
+    return redirect()
+        ->route('admin.quotes.show', $quote)
+        ->with(
+            'success',
+            'Quotation approved successfully.'
+        );
+}
+
+/**
+ * Reject a quotation.
+ */
+public function reject(
+    Request $request,
+    Quote $quote
+): RedirectResponse {
+    abort_unless(
+        $request->user()?->hasAnyRole([
+            'supervisor',
+            'lab_manager',
+            'super_admin',
+        ]),
+        403
+    );
+
+    $validated = $request->validate([
+        'rejection_reason' => [
+            'required',
+            'string',
+            'min:5',
+            'max:2000',
+        ],
+    ]);
+
+    DB::transaction(function () use (
+        $quote,
+        $validated
+    ): void {
+        $lockedQuote = Quote::query()
+            ->whereKey($quote->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        if (!$lockedQuote->canBeRejected()) {
+            throw ValidationException::withMessages([
+                'quotation' =>
+                    'Only draft quotations can be rejected.',
+            ]);
+        }
+
+        if (
+            (float) ($lockedQuote->amount_paid ?? 0) > 0
+            || $lockedQuote->mpesaPayments()->exists()
+            || $lockedQuote->paid_at !== null
+        ) {
+            throw ValidationException::withMessages([
+                'quotation' =>
+                    'This quotation has payment activity and cannot be rejected.',
+            ]);
+        }
+
+        $lockedQuote->markAsRejected(
+            $validated['rejection_reason']
+        );
+    }, 3);
+
+    return redirect()
+        ->route('admin.quotes.show', $quote)
+        ->with(
+            'success',
+            'Quotation rejected successfully.'
+        );
+}
 }

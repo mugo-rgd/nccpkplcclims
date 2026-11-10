@@ -44,6 +44,7 @@ use App\Http\Controllers\Admin\CustomerVatVerificationController;
 use App\Http\Controllers\Admin\EquipmentEnvironmentalConditionsController;
 use App\Http\Controllers\Admin\EquipmentTestReviewController;
 use App\Http\Controllers\Admin\EquipmentTestReportController;
+use App\Http\Controllers\Admin\ManualPaymentController;
 
 // Add this temporary route at the top of your routes file
 Route::get('/test-bulk', function() {
@@ -67,13 +68,30 @@ Route::get('/', function () {
 
 Route::get('/', [HomeController::class, 'index'])
     ->name('home');
-// Guest routes (not logged in)
-Route::middleware('guest')->group(function () {
-    Route::get('register', [RegisterController::class, 'showRegistrationForm'])->name('register');
-    Route::post('register', [RegisterController::class, 'register']);
 
-    Route::get('login', [App\Http\Controllers\Auth\LoginController::class, 'showLoginForm'])->name('login');
-    Route::post('login', [App\Http\Controllers\Auth\LoginController::class, 'login']);
+/*
+|--------------------------------------------------------------------------
+| CUSTOMER REGISTRATION
+|--------------------------------------------------------------------------
+| Guests and authorized KPLC staff use the same registration form.
+|--------------------------------------------------------------------------
+*/
+
+Route::get('/register', [RegisterController::class,'showRegistrationForm',])->name('register');
+
+Route::post('/register', [RegisterController::class,'register',])->middleware('throttle:5,1')->name('register.store');
+
+/*
+|--------------------------------------------------------------------------
+| LOGIN ROUTES
+|--------------------------------------------------------------------------
+*/
+
+Route::middleware('guest')->group(function () {
+
+    Route::get('/login', [App\Http\Controllers\Auth\LoginController::class,'showLoginForm',])->name('login');
+
+    Route::post('/login', [App\Http\Controllers\Auth\LoginController::class,'login',]);
 });
 
 // Route::post('/request-calibration-quote',[PublicQuoteRequestController::class,'store',])->name('public.quote-request.store');
@@ -83,7 +101,10 @@ Route::post('/quote-request',[PublicQuoteRequestSubmissionController::class, 'st
 // ============================================ //
 
 // Authentication Routes - Laravel UI
-Auth::routes();
+Auth::routes([
+    'register' => false,
+    'login' => false,
+]);
 
 // ============================================ //
 // PASSWORD RESET ROUTES - Must be outside auth //
@@ -889,7 +910,40 @@ Route::middleware(['auth'])->group(function () {
         Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
     });
 
-    Route::get(
+    Route::middleware(['auth', 'role:super_admin|lab_manager|supervisor|finance'])
+    ->prefix('admin/payments')->name('admin.payments.')->group(function (): void {
+        Route::get('/quote/{quote}', [ManualPaymentController::class, 'index'])->name('index');
+        Route::post('/quote/{quote}', [ManualPaymentController::class, 'store'])->middleware('throttle:10,1')->name('store');
+        Route::post('/{payment}/confirm', [ManualPaymentController::class, 'confirm'])->name('confirm');
+        Route::post('/{payment}/reject', [ManualPaymentController::class, 'reject'])->name('reject');
+        Route::get('/{payment}/receipt', [ManualPaymentController::class, 'receipt'])->name('receipt');
+        Route::get('/{payment}/clearance', [ManualPaymentController::class, 'clearance'])->name('clearance');
+    });
+
+/*
+|--------------------------------------------------------------------------
+| Complete Provisional Quick Add Customer Registration
+|--------------------------------------------------------------------------
+|
+| Only authorized KPLC staff may complete registration.
+|
+*/
+
+Route::middleware(['auth','role:super_admin|lab_manager|supervisor',])->group(function () {
+    Route::get('customers/{customer}/complete-registration',[CustomerController::class,'completeRegistrationForm',])->name('customers.complete-registration.form');
+    Route::post('customers/{customer}/complete-registration',[CustomerController::class,'completeRegistration',])->middleware('throttle:10,1')->name('customers.complete-registration');
+});
+
+Route::post('/admin/customers/{customer}/kra-pin/verify',[\App\Http\Controllers\Admin\CustomerController::class, 'verifyKraPinDocument'])->name('admin.customers.kra-pin.verify');
+Route::post('/admin/customers/{customer}/kra-pin/reject',[\App\Http\Controllers\Admin\CustomerController::class, 'rejectKraPinDocument'])->name('admin.customers.kra-pin.reject');
+Route::get('/admin/customers/{customer}/kra-pin/{document}/view',[\App\Http\Controllers\Admin\CustomerController::class, 'viewKraPinDocument'])->name('admin.customers.kra-pin.view');
+Route::post('/admin/customers/{customer}/kra-pin/replace',[\App\Http\Controllers\Admin\CustomerController::class, 'replaceKraPinDocument'])->name('admin.customers.kra-pin.replace');
+
+Route::get('admin/payments', [\App\Http\Controllers\Admin\ManualPaymentController::class, 'dashboard'])
+    ->middleware('permission:payments.view')
+    ->name('admin.payments.dashboard');
+    
+Route::get(
     '/calibrations/lookup-by-serial',
     [CalibrationController::class, 'lookupBySerial']
 )->name('calibrations.lookup-by-serial');
@@ -1572,12 +1626,14 @@ Route::get('/check/{calibration}', [QualityController::class, 'check'])
     // ============================================ //
     // QUOTE ROUTES                               //
     // ============================================ //
+ 
     Route::middleware(['auth'])->prefix('admin/quotes')->name('admin.quotes.')->group(function (): void {
-            Route::get('/{quote}', [QuoteController::class, 'show'])->name('show');
-            Route::get('/{quote}/download', [QuoteController::class, 'download'])->name('download');
-            Route::patch('/{quote}/approve', [QuoteController::class, 'approve'])->middleware('can:approve_quotes')->name('approve');
-            Route::post('/{quote}/cancel-and-replace',[QuoteController::class, 'cancelAndReplace'])->middleware('role:supervisor|super_admin|lab_manager')->name('cancel-and-replace');
-        });
+        Route::get('/{quote}', [QuoteController::class, 'show'])->middleware('role:supervisor|lab_manager|super_admin')->name('show');
+        Route::get('/{quote}/download', [QuoteController::class, 'download'])->middleware('role:supervisor|lab_manager|super_admin')->name('download');
+        Route::patch('/{quote}/approve', [QuoteController::class,'approve',])->middleware('role:supervisor|lab_manager|super_admin')->name('approve');
+Route::patch('/{quote}/reject', [QuoteController::class,'reject',])->middleware('role:supervisor|lab_manager|super_admin')->name('reject');
+        Route::post('/{quote}/cancel-and-replace', [QuoteController::class, 'cancelAndReplace'])->middleware('role:super_admin|lab_manager')->name('cancel-and-replace');
+});
 
         Route::middleware('auth')->group(function () {
             Route::get('/notifications',[NotificationController::class, 'index'])->name('notifications.index');

@@ -4,25 +4,45 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 
 class CustomerRegistrationRequest extends FormRequest
 {
     public function authorize(): bool
-    {
-        return true;
-    }
+{
+    $user = $this->user();
+
+    return $user === null
+        || $user->hasAnyRole([
+            'super_admin',
+            'lab_manager',
+            'supervisor',
+        ]);
+}
 
     protected function prepareForValidation(): void
-    {
-        $this->merge([
-            'tax_id' => strtoupper(
-                trim((string) $this->input('tax_id', ''))
-            ),
-            'vat_exemption_requested' => $this->boolean(
-                'vat_exemption_requested'
-            ),
-        ]);
-    }
+{
+    $this->merge([
+        'tax_id' => strtoupper(
+            preg_replace(
+                '/\s+/',
+                '',
+                (string) $this->input('tax_id', '')
+            )
+        ),
+
+        'vat_exemption_requested' => $this->boolean(
+            'vat_exemption_requested'
+        ),
+
+        'vat_exemption_certificate_number' => trim(
+            (string) $this->input(
+                'vat_exemption_certificate_number',
+                ''
+            )
+        ),
+    ]);
+}
 
     public function rules(): array
     {
@@ -39,9 +59,14 @@ class CustomerRegistrationRequest extends FormRequest
             'phone_number' => [
                 'required', 'string', 'max:20'
             ],
-            'password' => [
-                'required', 'string', 'min:8', 'confirmed'
-            ],
+          'password' => [
+    'required',
+    'string',
+    Password::min(8)
+        ->letters()
+        ->numbers(),
+    'confirmed',
+],
 
             // Company information
             'company_name' => [
@@ -114,6 +139,9 @@ class CustomerRegistrationRequest extends FormRequest
                 'mimes:pdf,jpg,jpeg,png',
                 'max:5120',
             ],
+            'terms' => [
+              'accepted',
+            ],
         ];
     }
 
@@ -179,6 +207,8 @@ class CustomerRegistrationRequest extends FormRequest
 
             'vat_exemption_certificate.max' =>
                 'The VAT exemption document must not exceed 5 MB.',
+                'terms.accepted' =>
+    'You must confirm that the information is accurate.',
         ];
     }
 }

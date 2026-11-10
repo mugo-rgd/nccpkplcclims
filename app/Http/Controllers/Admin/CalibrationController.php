@@ -38,7 +38,7 @@ use App\Mail\CalibrationQuotationMail;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use App\Services\CustomerVatService;
-
+use App\Services\QuotationNumberService;
 
 class CalibrationController extends Controller
 {
@@ -341,19 +341,7 @@ class CalibrationController extends Controller
         ]);
     }
 
- /**
- * Store a newly generated quotation.
- *
- * Workflow:
- *
- * External:
- * pending -> quoted
- *
- * Internal KPLC:
- * pending -> quoted
- *
- * Sending/payment is handled separately.
- */
+ 
 /**
  * Generate and save a draft quotation for a pending calibration.
  *
@@ -361,94 +349,221 @@ class CalibrationController extends Controller
  * On-site charges are excluded from the VAT base to match the existing UI.
  * Confirm this tax treatment with Finance before production deployment.
  */
+
+
 public function storeQuotation(Request $request, $calibrationId)
 {
+    /*
+    |--------------------------------------------------------------------------
+    | 1. Authorization
+    |--------------------------------------------------------------------------
+    */
+
     $user = Auth::user();
 
-    abort_unless($user && !$user->hasRole('customer'), 403,
-        'Customers cannot generate quotations.');
+    abort_unless(
+        $user && !$user->hasRole('customer'),
+        403,
+        'Customers cannot generate quotations.'
+    );
 
-    // Add your staff-specific policy/permission check here if configured.
+    /*
+    |--------------------------------------------------------------------------
+    | 2. Load calibration and related records
+    |--------------------------------------------------------------------------
+    */
+
     $calibration = Calibration::query()
-        ->with(['customer', 'equipmentType', 'items'])
+        ->with([
+            'customer',
+            'equipmentType',
+            'items',
+        ])
         ->findOrFail($calibrationId);
 
-    $customer = $calibration->customer;
-
-    if (!$customer) {
-        return back()->withInput()->with('error',
-            'No customer is associated with this calibration.');
+    if (!$calibration->customer) {
+        return back()
+            ->withInput()
+            ->with(
+                'error',
+                'No customer is associated with this calibration.'
+            );
     }
 
     if ($calibration->status !== 'pending') {
-        return back()->withInput()->with('error',
-            'Quotation can only be generated for a pending calibration.');
+        return back()
+            ->withInput()
+            ->with(
+                'error',
+                'Quotation can only be generated for a pending calibration.'
+            );
     }
 
     if ($this->latestQuotation($calibration)) {
-        return back()->withInput()->with('error',
-            'A quotation has already been generated for this calibration.');
+        return back()
+            ->withInput()
+            ->with(
+                'error',
+                'A quotation has already been generated for this calibration.'
+            );
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 3. Validate request
+    |--------------------------------------------------------------------------
+    */
 
     $validated = $request->validate([
         'items' => ['required', 'array', 'min:1'],
-        'items.*.calibration_item_id' => ['nullable', 'integer', 'exists:calibration_items,id'],
-        'items.*.service_type_id' => ['nullable', 'integer', 'exists:kplc_service_types,id'],
-        'items.*.equipment_name' => ['nullable', 'string', 'max:255'],
-        'items.*.serial_number' => ['nullable', 'string', 'max:255'],
-        'items.*.description' => ['required', 'string', 'max:500'],
-        'items.*.quantity' => ['required', 'numeric', 'min:0.01', 'max:999999'],
-        'items.*.unit_price' => ['nullable', 'numeric', 'min:0', 'max:999999999'],
-        'discount_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
-        'valid_until' => ['nullable', 'date', 'after:today'],
+
+        'items.*.calibration_item_id' => [
+            'nullable', 'integer', 'exists:calibration_items,id',
+        ],
+
+        'items.*.service_type_id' => [
+            'nullable', 'integer', 'exists:kplc_service_types,id',
+        ],
+
+        'items.*.equipment_name' => [
+            'nullable', 'string', 'max:255',
+        ],
+
+        'items.*.serial_number' => [
+            'nullable', 'string', 'max:255',
+        ],
+
+        'items.*.description' => [
+            'required', 'string', 'max:500',
+        ],
+
+        'items.*.quantity' => [
+            'required', 'numeric', 'min:0.01', 'max:999999',
+        ],
+
+        'items.*.unit_price' => [
+            'nullable', 'numeric', 'min:0', 'max:999999999',
+        ],
+
+        'discount_percentage' => [
+            'nullable', 'numeric', 'min:0', 'max:100',
+        ],
+
+        'valid_until' => [
+            'nullable', 'date', 'after:today',
+        ],
+
         'terms' => ['nullable', 'string'],
         'notes' => ['nullable', 'string'],
-        'number_of_staff' => ['nullable', 'integer', 'min:1'],
-        'travel_days' => ['nullable', 'integer', 'min:1'],
-        'site_distance_km' => ['nullable', 'numeric', 'min:0'],
-        'per_diem_rate' => ['nullable', 'numeric', 'min:0'],
-        'transport_cost' => ['nullable', 'numeric', 'min:0'],
-        'other_costs' => ['nullable', 'numeric', 'min:0'],
-        'other_costs_description' => ['nullable', 'string', 'max:1000'],
+
+        'number_of_staff' => [
+            'nullable', 'integer', 'min:1',
+        ],
+
+        'travel_days' => [
+            'nullable', 'integer', 'min:1',
+        ],
+
+        'site_distance_km' => [
+            'nullable', 'numeric', 'min:0',
+        ],
+
+        'per_diem_rate' => [
+            'nullable', 'numeric', 'min:0',
+        ],
+
+        'transport_cost' => [
+            'nullable', 'numeric', 'min:0',
+        ],
+
+        'other_costs' => [
+            'nullable', 'numeric', 'min:0',
+        ],
+
+        'other_costs_description' => [
+            'nullable', 'string', 'max:1000',
+        ],
     ]);
 
-    $calibrationItems = $calibration->items->keyBy('id');
-    $serviceTypes = KplcServiceType::query()->get()->keyBy('id');
-    $serviceTypesByCode = $serviceTypes->keyBy('serv_code');
-    $equipmentTypes = KplcEquipmentType::query()->get()->keyBy('id');
+    /*
+    |--------------------------------------------------------------------------
+    | 4. Load equipment and service rate references
+    |--------------------------------------------------------------------------
+    */
 
-    // Service selections may contain numeric IDs or codes such as EM002.
-    $normalizeServiceIds = static function ($raw) use ($serviceTypesByCode): array {
+    $calibrationItems = $calibration->items->keyBy('id');
+
+    $serviceTypes = KplcServiceType::query()
+        ->get()
+        ->keyBy('id');
+
+    $serviceTypesByCode = $serviceTypes->keyBy('serv_code');
+
+    $equipmentTypes = KplcEquipmentType::query()
+        ->get()
+        ->keyBy('id');
+
+    /*
+    |--------------------------------------------------------------------------
+    | 5. Normalize service IDs
+    |--------------------------------------------------------------------------
+    */
+
+    $normalizeServiceIds = static function ($raw) use (
+        $serviceTypesByCode
+    ): array {
+
         if (is_string($raw)) {
             $raw = json_decode($raw, true) ?: [];
         }
+
         if (!is_array($raw)) {
             return [];
         }
 
-        return collect($raw)->map(static function ($value) use ($serviceTypesByCode) {
-            if (is_array($value)) {
-                $value = $value['id'] ?? $value['serv_code'] ?? null;
-            }
-            if (is_numeric($value)) {
-                return (int) $value;
-            }
-            return $serviceTypesByCode->get((string) $value)?->id;
-        })->filter(static fn ($id) => $id !== null)
-          ->map(static fn ($id) => (int) $id)
-          ->unique()->values()->all();
+        return collect($raw)
+            ->map(function ($value) use ($serviceTypesByCode) {
+
+                if (is_array($value)) {
+                    $value = $value['id']
+                        ?? $value['serv_code']
+                        ?? null;
+                }
+
+                if (is_numeric($value)) {
+                    return (int) $value;
+                }
+
+                return $serviceTypesByCode
+                    ->get((string) $value)?->id;
+            })
+            ->filter(fn ($id) => $id !== null)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     };
+
+    /*
+    |--------------------------------------------------------------------------
+    | 6. Build quotation items
+    |--------------------------------------------------------------------------
+    */
+
     $seenPairs = [];
     $quoteItems = [];
     $subtotal = 0.0;
     $errors = [];
 
     foreach ($validated['items'] as $index => $item) {
+
         $equipmentId = $item['calibration_item_id'] ?? null;
         $serviceId = $item['service_type_id'] ?? null;
+
         $equipment = $equipmentId !== null
             ? $calibrationItems->get((int) $equipmentId)
             : null;
+
         $service = $serviceId !== null
             ? $serviceTypes->get((int) $serviceId)
             : null;
@@ -456,228 +571,563 @@ public function storeQuotation(Request $request, $calibrationId)
         if ($equipmentId !== null && !$equipment) {
             $errors["items.{$index}.calibration_item_id"] =
                 'The equipment item does not belong to this calibration.';
+
             continue;
         }
 
         if (($equipmentId === null) !== ($serviceId === null)) {
             $errors["items.{$index}.service_type_id"] =
-                'Calibration charges require both an equipment item and a service type.';
+                'Calibration charges require both an equipment item '
+                . 'and a service type.';
+
             continue;
         }
 
         if ($serviceId !== null && !$service) {
             $errors["items.{$index}.service_type_id"] =
                 'The selected service type could not be found.';
+
             continue;
         }
 
-        if ($equipment && $service) {
-            $requestedIds = $normalizeServiceIds($equipment->service_types ?? []);
+        /*
+        |--------------------------------------------------------------------------
+        | Verify equipment/service pairing
+        |--------------------------------------------------------------------------
+        */
 
-            if (!in_array((int) $service->id, $requestedIds, true)) {
+        if ($equipment && $service) {
+
+            $requestedIds = $normalizeServiceIds(
+                $equipment->service_types ?? []
+            );
+
+            if (
+                !in_array(
+                    (int) $service->id,
+                    $requestedIds,
+                    true
+                )
+            ) {
                 $errors["items.{$index}.service_type_id"] =
-                    'This service was not requested for the selected equipment.';
+                    'This service was not requested for '
+                    . 'the selected equipment.';
+
                 continue;
             }
 
             $pair = $equipment->id . ':' . $service->id;
+
             if (isset($seenPairs[$pair])) {
                 $errors["items.{$index}.service_type_id"] =
-                    'This equipment/service combination has already been added.';
+                    'This equipment/service combination '
+                    . 'has already been added.';
+
                 continue;
             }
+
             $seenPairs[$pair] = true;
         }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Determine unit price
+        |--------------------------------------------------------------------------
+        */
 
         $quantity = (float) $item['quantity'];
 
         if ($equipment && $service) {
-            $equipmentType = $equipmentTypes->get((int) $equipment->equipment_type_id);
+
+            $equipmentType = $equipmentTypes->get(
+                (int) $equipment->equipment_type_id
+            );
+
             if (!$equipmentType) {
                 $errors["items.{$index}.calibration_item_id"] =
-                    'No equipment rate is configured for ' .
-                    ($equipment->equipment_name ?: 'the selected equipment') . '.';
+                    'No equipment rate is configured for '
+                    . ($equipment->equipment_name
+                        ?: 'the selected equipment')
+                    . '.';
+
                 continue;
             }
-            // Do not trust browser-submitted prices for requested services.
+
+            // Use authoritative equipment rate.
             $unitPrice = (float) $equipmentType->rate;
+
         } else {
-            // Extra/custom lines may be priced by authorized staff.
-            if (!isset($item['unit_price']) || !is_numeric($item['unit_price'])) {
+
+            if (
+                !isset($item['unit_price']) ||
+                !is_numeric($item['unit_price'])
+            ) {
                 $errors["items.{$index}.unit_price"] =
                     'A unit price is required for a custom charge.';
+
                 continue;
             }
+
             $unitPrice = (float) $item['unit_price'];
         }
-        $lineTotal = round($quantity * $unitPrice, 2);
-        $subtotal = round($subtotal + $lineTotal, 2);
+
+        $lineTotal = round(
+            $quantity * $unitPrice,
+            2
+        );
+
+        $subtotal = round(
+            $subtotal + $lineTotal,
+            2
+        );
 
         $quoteItems[] = [
             'calibration_item_id' => $equipment?->id,
             'equipment_type_id' => $equipment?->equipment_type_id,
             'service_type_id' => $service?->id,
+
             'equipment_name' => $equipment?->equipment_name
                 ?? ($item['equipment_name'] ?? 'Additional charge'),
+
             'serial_number' => $equipment?->serial_number
                 ?? ($item['serial_number'] ?? null),
+
             'service_code' => $service?->serv_code,
             'service_name' => $service?->serv_name,
+
             'description' => $item['description'],
             'quantity' => $quantity,
             'unit_price' => $unitPrice,
             'total' => $lineTotal,
-            'type' => $equipment && $service ? 'calibration' : 'custom',
+
+            'type' => $equipment && $service
+                ? 'calibration'
+                : 'custom',
         ];
     }
 
     if ($errors) {
-        throw \Illuminate\Validation\ValidationException::withMessages($errors);
+        throw \Illuminate\Validation\ValidationException::withMessages(
+            $errors
+        );
     }
 
-    // Do not silently omit any service requested by the customer.
+    /*
+    |--------------------------------------------------------------------------
+    | 7. Ensure every requested service is quoted
+    |--------------------------------------------------------------------------
+    */
+
     foreach ($calibration->items as $equipment) {
-        foreach ($normalizeServiceIds($equipment->service_types ?? []) as $serviceId) {
-            if (!isset($seenPairs[$equipment->id . ':' . $serviceId])) {
+
+        $requestedServiceIds = $normalizeServiceIds(
+            $equipment->service_types ?? []
+        );
+
+        foreach ($requestedServiceIds as $serviceId) {
+
+            $pair = $equipment->id . ':' . $serviceId;
+
+            if (!isset($seenPairs[$pair])) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
-                    'items' => "Missing quotation line for {$equipment->equipment_name} "
-                        . "(serial {$equipment->serial_number}), service ID {$serviceId}.",
+                    'items' =>
+                        "Missing quotation line for "
+                        . "{$equipment->equipment_name} "
+                        . "(serial {$equipment->serial_number}), "
+                        . "service ID {$serviceId}.",
                 ]);
             }
         }
     }
 
-    $isInternal = $this->isInternalKplcCalibration($calibration);
-    $isOnsite = $calibration->calibration_location === 'on_site';
-    $numberOfStaff = $isOnsite ? (int) ($validated['number_of_staff'] ?? 1) : 1;
-    $travelDays = $isOnsite ? (int) ($validated['travel_days'] ?? 1) : 1;
-    $siteDistance = $isOnsite ? (float) ($validated['site_distance_km'] ?? 0) : 0.0;
-    $perDiemRate = $isOnsite ? (float) ($validated['per_diem_rate'] ?? 0) : 0.0;
-    $transportTotal = $isOnsite ? round((float) ($validated['transport_cost'] ?? 0), 2) : 0.0;
-    $otherTotal = $isOnsite ? round((float) ($validated['other_costs'] ?? 0), 2) : 0.0;
-    $perDiemTotal = $isOnsite
-        ? round($numberOfStaff * $travelDays * $perDiemRate, 2)
+    /*
+    |--------------------------------------------------------------------------
+    | 8. Determine internal/external and onsite status
+    |--------------------------------------------------------------------------
+    */
+
+    $isInternal = $this->isInternalKplcCalibration(
+        $calibration
+    );
+
+    $isOnsite =
+        $calibration->calibration_location === 'on_site';
+
+    /*
+    |--------------------------------------------------------------------------
+    | 9. Calculate onsite costs
+    |--------------------------------------------------------------------------
+    */
+
+    $numberOfStaff = $isOnsite
+        ? (int) ($validated['number_of_staff'] ?? 1)
+        : 1;
+
+    $travelDays = $isOnsite
+        ? (int) ($validated['travel_days'] ?? 1)
+        : 1;
+
+    $siteDistance = $isOnsite
+        ? (float) ($validated['site_distance_km'] ?? 0)
         : 0.0;
+
+    $perDiemRate = $isOnsite
+        ? (float) ($validated['per_diem_rate'] ?? 0)
+        : 0.0;
+
+    $transportTotal = $isOnsite
+        ? round((float) ($validated['transport_cost'] ?? 0), 2)
+        : 0.0;
+
+    $otherTotal = $isOnsite
+        ? round((float) ($validated['other_costs'] ?? 0), 2)
+        : 0.0;
+
+    $perDiemTotal = $isOnsite
+        ? round(
+            $numberOfStaff * $travelDays * $perDiemRate,
+            2
+        )
+        : 0.0;
+
+    /*
+    |--------------------------------------------------------------------------
+    | 10. Add onsite charges to quotation items
+    |--------------------------------------------------------------------------
+    |
+    | Current treatment preserved pending Finance confirmation:
+    | onsite charges are excluded from the VAT base.
+    |--------------------------------------------------------------------------
+    */
 
     if ($perDiemTotal > 0) {
         $quoteItems[] = [
-            'description' => "Per Diem ({$numberOfStaff} staff × {$travelDays} day(s))",
-            'quantity' => 1, 'unit_price' => $perDiemTotal,
-            'total' => $perDiemTotal, 'type' => 'onsite_perdiem',
+            'description' =>
+                "Per Diem ({$numberOfStaff} staff × {$travelDays} day(s))",
+            'quantity' => 1,
+            'unit_price' => $perDiemTotal,
+            'total' => $perDiemTotal,
+            'type' => 'onsite_perdiem',
         ];
     }
+
     if ($transportTotal > 0) {
         $quoteItems[] = [
-            'description' => "Transport (Site distance: {$siteDistance} KM)",
-            'quantity' => 1, 'unit_price' => $transportTotal,
-            'total' => $transportTotal, 'type' => 'onsite_transport',
+            'description' =>
+                "Transport (Site distance: {$siteDistance} KM)",
+            'quantity' => 1,
+            'unit_price' => $transportTotal,
+            'total' => $transportTotal,
+            'type' => 'onsite_transport',
         ];
     }
+
     if ($otherTotal > 0) {
         $quoteItems[] = [
-            'description' => ($validated['other_costs_description'] ?? null) ?: 'Other costs',
-            'quantity' => 1, 'unit_price' => $otherTotal,
-            'total' => $otherTotal, 'type' => 'onsite_other',
+            'description' =>
+                ($validated['other_costs_description'] ?? null)
+                ?: 'Other costs',
+            'quantity' => 1,
+            'unit_price' => $otherTotal,
+            'total' => $otherTotal,
+            'type' => 'onsite_other',
         ];
     }
 
-    $discountPercentage = (float) ($validated['discount_percentage'] ?? 0);
-    $discountAmount = round($subtotal * $discountPercentage / 100, 2);
-    $afterDiscount = round($subtotal - $discountAmount, 2);
-    $taxRate = max(0, min(100, (float) app(CustomerVatService::class)->rate($customer)));
-    $taxAmount = round($afterDiscount * $taxRate / 100, 2);
-    $onsiteCosts = round($perDiemTotal + $transportTotal + $otherTotal, 2);
-    $totalAmount = round($afterDiscount + $taxAmount + $onsiteCosts, 2);
+    /*
+    |--------------------------------------------------------------------------
+    | 11. Calculate discount and taxable service subtotal
+    |--------------------------------------------------------------------------
+    */
+
+    $discountPercentage = (float) (
+        $validated['discount_percentage'] ?? 0
+    );
+
+    $discountAmount = round(
+        $subtotal * $discountPercentage / 100,
+        2
+    );
+
+    $afterDiscount = round(
+        max(0, $subtotal - $discountAmount),
+        2
+    );
+
+    $onsiteCosts = round(
+        $perDiemTotal + $transportTotal + $otherTotal,
+        2
+    );
+
+    /*
+    |--------------------------------------------------------------------------
+    | 12. Save quotation atomically
+    |--------------------------------------------------------------------------
+    */
 
     try {
-        DB::transaction(function () use (
-            $calibration, $customer, $isInternal, $quoteItems, $subtotal,
-            $taxRate, $taxAmount, $discountAmount, $discountPercentage,
-            $totalAmount, $validated, $numberOfStaff, $travelDays,
-            $siteDistance, $perDiemTotal, $transportTotal, $otherTotal
-        ) {
-            // Serialize competing quotation-generation requests for this calibration.
-            $locked = Calibration::query()->whereKey($calibration->id)
-                ->lockForUpdate()->firstOrFail();
 
-            if ($locked->status !== 'pending' ||
-                Quote::query()->where('calibration_id', $locked->id)->exists()) {
+        DB::transaction(function () use (
+            $calibration,
+            $isInternal,
+            $quoteItems,
+            $subtotal,
+            $discountAmount,
+            $discountPercentage,
+            $afterDiscount,
+            $onsiteCosts,
+            $validated,
+            $numberOfStaff,
+            $travelDays,
+            $siteDistance,
+            $perDiemTotal,
+            $transportTotal,
+            $otherTotal
+        ) {
+
+            /*
+            |--------------------------------------------------------------------------
+            | Lock calibration to prevent duplicate quotation generation
+            |--------------------------------------------------------------------------
+            */
+
+            $locked = Calibration::query()
+                ->whereKey($calibration->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (
+                $locked->status !== 'pending' ||
+                Quote::query()
+                    ->where('calibration_id', $locked->id)
+                    ->exists()
+            ) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
-                    'items' => 'A quotation has already been generated or the calibration is no longer pending.',
+                    'items' =>
+                        'A quotation has already been generated '
+                        . 'or the calibration is no longer pending.',
                 ]);
             }
 
-            $quoteNumber = $this->generateQuoteNumber($customer);
+            /*
+            |--------------------------------------------------------------------------
+            | Lock customer before reading VAT approval information
+            |--------------------------------------------------------------------------
+            */
 
-            Quote::query()->create([
+            $lockedCustomer = Customer::query()
+                ->whereKey($locked->customer_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            /*
+            |--------------------------------------------------------------------------
+            | Calculate applicable VAT rate
+            |--------------------------------------------------------------------------
+            */
+
+            $vatService = app(CustomerVatService::class);
+
+            $taxRate = round(
+                max(
+                    0,
+                    min(
+                        100,
+                        (float) $vatService->rate($lockedCustomer)
+                    )
+                ),
+                2
+            );
+
+            /*
+            |--------------------------------------------------------------------------
+            | VAT applies to discounted service subtotal only.
+            |--------------------------------------------------------------------------
+            */
+
+            $taxAmount = round(
+                $afterDiscount * $taxRate / 100,
+                2
+            );
+
+            $totalAmount = round(
+                $afterDiscount
+                + $taxAmount
+                + $onsiteCosts,
+                2
+            );
+
+            /*
+            |--------------------------------------------------------------------------
+            | Generate quotation number
+            |--------------------------------------------------------------------------
+            */
+$quoteNumber = app(
+    QuotationNumberService::class
+)->generate($lockedCustomer);
+
+            /*
+            |--------------------------------------------------------------------------
+            | Create quotation
+            |--------------------------------------------------------------------------
+            */
+
+            $quote = Quote::query()->create([
                 'calibration_id' => $locked->id,
-                'customer_id' => $locked->customer_id,
+                'customer_id' => $lockedCustomer->id,
                 'created_by' => Auth::id(),
+
                 'quote_number' => $quoteNumber,
-                'quote_reference' => 'REF-' . strtoupper(Str::random(10)),
+
+                'quote_reference' =>
+                    'REF-' . strtoupper(Str::random(10)),
+
                 'subtotal' => $subtotal,
-                'tax_amount' => $taxAmount,
                 'tax_rate' => $taxRate,
+                'tax_amount' => $taxAmount,
+
                 'discount_amount' => $discountAmount,
                 'discount_percentage' => $discountPercentage,
+
                 'total_amount' => $totalAmount,
+
                 'amount_paid' => 0,
-                'balance_due' => $isInternal ? 0 : $totalAmount,
+
+                'balance_due' => $isInternal
+                    ? 0
+                    : $totalAmount,
+
                 'status' => Quote::STATUS_DRAFT,
+
                 'is_external' => !$isInternal,
+
                 'currency' => 'KES',
+
                 'items' => $quoteItems,
+
                 'notes' => $validated['notes'] ?? null,
-                'terms' => $validated['terms'] ?? ($isInternal
-                    ? 'Internal KPLC calibration costing.'
-                    : 'Payment is required before calibration/testing commences.'),
-                'valid_until' => $validated['valid_until'] ?? now()->addDays(30),
-                'payment_token' => $isInternal ? null : Str::random(64),
+
+                'terms' => $validated['terms']
+                    ?? (
+                        $isInternal
+                            ? 'Internal KPLC calibration costing.'
+                            : 'Payment is required before calibration/testing commences.'
+                    ),
+
+                'valid_until' =>
+                    $validated['valid_until']
+                    ?? now()->addDays(30),
+
+                'payment_token' => $isInternal
+                    ? null
+                    : Str::random(64),
+
                 'mpesa_payment_status' => 'unpaid',
+
                 'sent_at' => null,
             ]);
 
+            /*
+            |--------------------------------------------------------------------------
+            | Update calibration
+            |--------------------------------------------------------------------------
+            */
+
             $updates = [
                 'status' => 'quoted',
+
                 'amount_due' => $totalAmount,
                 'amount_paid' => 0,
+
                 'requires_payment' => !$isInternal,
                 'is_external' => !$isInternal,
+
                 'number_of_staff' => $numberOfStaff,
                 'travel_days' => $travelDays,
                 'site_distance_km' => $siteDistance,
+
                 'per_diem_cost' => $perDiemTotal,
                 'transport_cost' => $transportTotal,
                 'other_costs' => $otherTotal,
-                'other_costs_description' => $validated['other_costs_description'] ?? null,
+
+                'other_costs_description' =>
+                    $validated['other_costs_description'] ?? null,
             ];
+
             if (!$isInternal) {
                 $updates['payment_status'] = 'pending';
             }
+
             $locked->update($updates);
-            AuditLogService::log('generated_quotation', $locked);
+
+            /*
+            |--------------------------------------------------------------------------
+            | Audit logging
+            |--------------------------------------------------------------------------
+            */
+
+            AuditLogService::log(
+                'generated_quotation',
+                $locked
+            );
+
+            Log::info('MCL quotation generated.', [
+                'quote_id' => $quote->id,
+                'calibration_id' => $locked->id,
+                'customer_id' => $lockedCustomer->id,
+                'quote_number' => $quoteNumber,
+                'subtotal' => $subtotal,
+                'discount_amount' => $discountAmount,
+                'tax_rate' => $taxRate,
+                'tax_amount' => $taxAmount,
+                'onsite_costs' => $onsiteCosts,
+                'total_amount' => $totalAmount,
+                'vat_exemption_status' =>
+                    $lockedCustomer->vat_exemption_status,
+                'generated_by' => Auth::id(),
+            ]);
+
         }, 3);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Success
+        |--------------------------------------------------------------------------
+        */
 
         return redirect()
             ->route('calibrations.show', $calibration)
-            ->with('success', $isInternal
-                ? 'Internal KPLC quotation generated successfully. You may now assign a technician.'
-                : 'Quotation generated successfully. Send it to the customer to proceed to payment.');
+            ->with(
+                'success',
+                $isInternal
+                    ? 'Internal KPLC quotation generated successfully. '
+                        . 'You may now assign a technician.'
+                    : 'Quotation generated successfully. '
+                        . 'Await approval by a Supervisor, Lab Manager or Super Administrator before sending it to the customer.'
+            );
+
     } catch (\Illuminate\Validation\ValidationException $exception) {
+
         throw $exception;
+
     } catch (\Throwable $exception) {
+
         Log::error('Quotation generation failed.', [
             'calibration_id' => $calibration->id,
             'user_id' => Auth::id(),
             'exception' => $exception,
         ]);
 
-        return back()->withInput()->with('error',
-            'The quotation could not be generated. Please contact the administrator if the problem persists.');
+        return back()
+            ->withInput()
+            ->with(
+                'error',
+                'The quotation could not be generated. '
+                . 'Please contact the administrator '
+                . 'if the problem persists.'
+            );
     }
 }
-
-
 
 public function store(StoreCalibrationRequest $request)
 {
@@ -1371,79 +1821,7 @@ private function getCustomerRequestId($calibration)
     return $request ? $request->id : null;
 }
 
-    /**
-     * Approve a calibration.
-     */
-//    public function approve(
-//     Calibration $calibration
-// ): RedirectResponse {
-//     DB::beginTransaction();
-
-//     try {
-//         $calibration->update([
-//             'status' => 'completed',
-//             'completed_at' => $calibration->completed_at ?? now(),
-//         ]);
-
-//        // Check if a certificate already exists
-// $certificate = Certificate::where(
-//     'calibration_id',
-//     $calibration->id
-// )->first();
-
-// if (!$certificate) {
-
-//     // Generate using the existing CertificateService
-//     $certificate = $this->certificateService
-//         ->generateFromCalibration($calibration);
-
-//     // Generate the PDF
-//     $this->certificateService
-//         ->generatePDF($certificate);
-
-//     // Update certificate status
-//     $certificate->update([
-//         'status' => CertificateController::STATUS_GENERATED,
-//         'generated_by' => auth()->id(),
-//         'generated_at' => now(),
-//     ]);
-// }
-
-//         if ($certificate->status === 'draft') {
-//             $certificate->update([
-//                 'status' => 'generated',
-//             ]);
-//         }
-
-//         DB::commit();
-
-//         return redirect()
-//             ->route('certificates.show', $certificate)
-//             ->with(
-//                 'success',
-//                 'Calibration approved and certificate generated.'
-//             );
-
-//     } catch (\Throwable $e) {
-//         DB::rollBack();
-
-//         Log::error(
-//             'Calibration approval failed',
-//             [
-//                 'calibration_id' => $calibration->id,
-//                 'error' => $e->getMessage(),
-//             ]
-//         );
-
-//         return back()->with(
-//             'error',
-//             'Failed to approve calibration: '
-//                 . $e->getMessage()
-//         );
-//     }
-// }
-
-    /**
+     /**
      * Reject a calibration.
      */
     public function reject(Request $request, Calibration $calibration)
@@ -3158,11 +3536,9 @@ public function generateQuotation(
 }
 
 
+
 /**
- * Send an external-customer quotation.
- *
- * Internal KPLC quotations are internal costing documents and are not
- * sent through the external-payment workflow.
+ * Send an approved quotation to an external customer.
  */
 public function sendQuotation(
     Calibration $calibration
@@ -3170,200 +3546,125 @@ public function sendQuotation(
     $user = Auth::user();
 
     abort_unless(
-        $user
-            && !$user->hasRole('customer'),
+        $user && $user->hasAnyRole(['super_admin', 'lab_manager', 'supervisor']),
         403,
-        'Customers cannot send quotations.'
+        'You are not authorised to send quotations.'
     );
 
-    $calibration->loadMissing(
-        'customer'
+    $calibration->loadMissing('customer');
+
+    if ($this->isInternalKplcCalibration($calibration)) {
+        return back()->with('error', 'Internal KPLC quotations are not sent through the external payment workflow.');
+    }
+
+    $customerEmail = trim((string) (
+        $calibration->customer?->company_email
+        ?: $calibration->customer?->email
+        ?: ''
+    ));
+
+    if (!filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+        return back()->with('error', 'A valid customer email address is required.');
+    }
+
+    // A cache lock spans email delivery and database update to reduce
+    // accidental double sends from concurrent staff requests.
+    $lock = \Illuminate\Support\Facades\Cache::lock(
+        'mcl:quotation-send:calibration:' . $calibration->id,
+        120
     );
 
-    if (
-        $this->isInternalKplcCalibration(
-            $calibration
-        )
-    ) {
-        return back()->with(
-            'error',
-            'Internal KPLC quotations do not use the customer payment workflow.'
-        );
-    }
-
-    $quotation =
-        $this->latestQuotation(
-            $calibration
-        );
-
-    if (!$quotation) {
-        return back()->with(
-            'error',
-            'Generate the quotation before sending it.'
-        );
-    }
-
-    if (
-        !in_array(
-            $calibration->status,
-            [
-                'quoted',
-                'pending_payment',
-            ],
-            true
-        )
-    ) {
-        return back()->with(
-            'error',
-            'The quotation cannot be sent while the calibration status is '
-            . $calibration->status
-            . '.'
-        );
-    }
-
-    $customerEmail = trim(
-        (string) (
-            $calibration->customer?->email
-            ?? ''
-        )
-    );
-
-    if ($customerEmail === '') {
-        return back()->with(
-            'error',
-            'The customer does not have an email address.'
-        );
+    if (!$lock->get()) {
+        return back()->with('error', 'This quotation is already being sent. Please wait.');
     }
 
     try {
-        Mail::to(
-            $customerEmail
-        )->send(
-            new CalibrationQuotationMail(
-                $calibration
-            )
+        $calibration->refresh();
+        $quotation = $this->latestQuotation($calibration);
+
+        if (!$quotation) {
+            return back()->with('error', 'Generate a quotation before sending it.');
+        }
+
+        if (!$quotation->canBeSent() || $quotation->status !== Quote::STATUS_APPROVED) {
+            return back()->with('error', 'Only approved, unexpired quotations can be sent to customers.');
+        }
+
+        if (!in_array($calibration->status, ['quoted', 'pending_payment'], true)) {
+            return back()->with('error', 'The calibration is not in a valid state for sending a quotation.');
+        }
+
+        // Do not record the quotation as sent until the mail transport
+        // accepts the message. The Mailable currently takes Calibration.
+        Mail::to($customerEmail)->send(
+            new CalibrationQuotationMail($calibration)
         );
 
-        DB::transaction(
-            function () use (
-                $calibration,
-                $quotation
-            ): void {
-                $quotation->update([
-                    'status' =>
-                        'sent',
+        DB::transaction(function () use ($quotation, $calibration): void {
+            $lockedQuote = Quote::query()
+                ->whereKey($quotation->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-                    'sent_at' =>
-                        now(),
-
-                    'is_external' =>
-                        true,
-
-                    'balance_due' =>
-                        max(
-                            (float) $quotation->total_amount
-                            - (float) $quotation->amount_paid,
-                            0
-                        ),
-                ]);
-
-                $updateData = [
-                    'status' =>
-                        'pending_payment',
-
-                    'requires_payment' =>
-                        true,
-
-                    'is_external' =>
-                        true,
-
-                    'payment_status' =>
-                        (
-                            (float) $calibration->amount_paid
-                            > 0
-                        )
-                            ? 'partial'
-                            : 'pending',
-                ];
-
-                if (
-                    Schema::hasColumn(
-                        $calibration->getTable(),
-                        'quote_sent_at'
-                    )
-                ) {
-                    $updateData[
-                        'quote_sent_at'
-                    ] = now();
-                }
-
-                if (
-                    Schema::hasColumn(
-                        $calibration->getTable(),
-                        'quotation_sent_at'
-                    )
-                ) {
-                    $updateData[
-                        'quotation_sent_at'
-                    ] = now();
-                }
-
-                if (
-                    Schema::hasColumn(
-                        $calibration->getTable(),
-                        'quotation_sent_by'
-                    )
-                ) {
-                    $updateData[
-                        'quotation_sent_by'
-                    ] = Auth::id();
-                }
-
-                $calibration->update(
-                    $updateData
-                );
+            if (!$lockedQuote->canBeSent() || $lockedQuote->status !== Quote::STATUS_APPROVED) {
+                throw new \DomainException('Quotation status changed during sending. Check email delivery before retrying.');
             }
-        );
 
-        AuditLogService::log(
-            'sent_quotation',
-            $calibration
-        );
+            $lockedQuote->update([
+                'status' => Quote::STATUS_SENT,
+                'sent_at' => now(),
+                'balance_due' => max(0, round(
+                    (float) $lockedQuote->total_amount - (float) $lockedQuote->amount_paid,
+                    2
+                )),
+            ]);
 
-        return back()->with(
-            'success',
-            "Quotation sent successfully to {$customerEmail}. Awaiting payment."
-        );
+            $updates = [
+                'status' => 'pending_payment',
+                'requires_payment' => true,
+                'is_external' => true,
+                'payment_status' => 'pending',
+            ];
 
+            foreach (['quote_sent_at', 'quotation_sent_at'] as $column) {
+                if (Schema::hasColumn($calibration->getTable(), $column)) {
+                    $updates[$column] = now();
+                }
+            }
+
+            if (Schema::hasColumn($calibration->getTable(), 'quotation_sent_by')) {
+                $updates['quotation_sent_by'] = Auth::id();
+            }
+
+            $calibration->update($updates);
+        }, 3);
+
+        try {
+            AuditLogService::log('sent_quotation', $calibration);
+        } catch (\Throwable $auditException) {
+            Log::warning('Quotation sent, but audit logging failed.', [
+                'calibration_id' => $calibration->id,
+                'quote_id' => $quotation->id,
+                'error' => $auditException->getMessage(),
+            ]);
+        }
+
+        return back()->with('success', "Approved quotation sent successfully to {$customerEmail}.");
     } catch (\Throwable $exception) {
-        Log::error(
-            'Quotation email failed.',
-            [
-                'calibration_id' =>
-                    $calibration->id,
-
-                'quotation_id' =>
-                    $quotation->id,
-
-                'recipient' =>
-                    $customerEmail,
-
-                'message' =>
-                    $exception->getMessage(),
-            ]
-        );
+        Log::error('Quotation sending failed; delivery status may require verification.', [
+            'calibration_id' => $calibration->id,
+            'recipient' => $customerEmail,
+            'error' => $exception->getMessage(),
+        ]);
 
         return back()->with(
             'error',
-            config('app.debug')
-                ? 'Failed to send quotation: '
-                    . $exception->getMessage()
-                : 'The quotation could not be sent.'
+            'Quotation sending could not be completed. Check the email and quotation status before retrying to avoid duplicate delivery.'
         );
+    } finally {
+        $lock->release();
     }
 }
-
-
 
 	/**
  * Generate the next quotation number for a customer.

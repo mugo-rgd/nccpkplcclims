@@ -36,6 +36,11 @@ class PublicQuoteRequestController extends Controller
                 'exists:kplc_service_types,id', // adjust table name
             ],
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:1000'],
+            'items.*.equipment_name' => ['nullable', 'string', 'max:255'],
+'items.*.serial_number'  => ['nullable', 'string', 'max:255'],
+'items.*.manufacturer'   => ['nullable', 'string', 'max:255'],
+'items.*.model'          => ['nullable', 'string', 'max:255'],
+'items.*.rating'         => ['nullable', 'string', 'max:255'],
         ]);
 
         try {
@@ -56,13 +61,19 @@ class PublicQuoteRequestController extends Controller
                     'status' => 'pending',
                 ]);
 
-                $items = collect($validated['items'])->map(function ($item) {
-                    return [
-                        'equipment_type_id' => (int) $item['equipment_type_id'],
-                        'service_type_id' => (int) $item['service_type_id'],
-                        'quantity' => (int) $item['quantity'],
-                    ];
-                })->all();
+              $items = collect($validated['items'])->map(function ($item) {
+    return [
+        'equipment_type_id' => (int) $item['equipment_type_id'],
+        'service_type_id'   => (int) $item['service_type_id'],
+        'quantity'          => (int) $item['quantity'],
+
+        'equipment_name' => $item['equipment_name'] ?? null,
+        'serial_number'  => $item['serial_number'] ?? null,
+        'manufacturer'   => $item['manufacturer'] ?? null,
+        'model'          => $item['model'] ?? null,
+        'rating'         => $item['rating'] ?? null,
+    ];
+})->all();
 
                 $quoteRequest->items()->createMany($items);
 

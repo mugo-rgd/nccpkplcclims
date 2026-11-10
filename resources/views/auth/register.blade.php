@@ -929,13 +929,28 @@
             <section class="form-panel">
                 <header class="form-heading">
                     <div>
-                        <h2>Create customer account</h2>
-                        <p>Complete the details below to access laboratory services.</p>
+                        @auth
+    <h2>Register New Customer</h2>
+    <p>
+        Create a customer account on behalf of the customer.
+        The registration will be submitted for approval.
+    </p>
+@else
+    <h2>Create Customer Account</h2>
+    <p>
+        Complete the details below to register
+        for laboratory services.
+    </p>
+@endauth
                     </div>
 
                     <div class="login-link">
-                        Already registered?
-                        <a href="{{ route('login') }}">Sign in</a>
+                       @guest
+    <div class="login-link">
+        Already registered?
+        <a href="{{ route('login') }}">Sign in</a>
+    </div>
+@endguest
                     </div>
                 </header>
 
@@ -985,13 +1000,13 @@
                 @endif
 
                 <form
-                    id="registrationForm"
-                    method="POST"
-                    action="{{ route('register') }}"
-                    enctype="multipart/form-data"
-                    novalidate
-                >
-                    @csrf
+    id="registrationForm"
+    method="POST"
+    action="{{ route('register.store') }}"
+    enctype="multipart/form-data"
+    novalidate
+>
+    @csrf
 
                     <!-- STEP 1: ACCOUNT INFORMATION -->
                     <div class="form-step active" id="step1">
@@ -1423,11 +1438,13 @@
                         <div class="terms-box">
                             <div class="form-check">
                                 <input
-                                    class="form-check-input"
-                                    type="checkbox"
-                                    id="terms"
-                                    required
-                                >
+    class="form-check-input"
+    type="checkbox"
+    id="terms"
+    name="terms"
+    value="1"
+    required
+>
 
                                 <label class="form-check-label" for="terms">
                                     I confirm that the information provided is accurate and

@@ -109,11 +109,13 @@ class PublicQuoteRequestController extends Controller
         'items.*.serial_number'          => ['required', 'string', 'max:255'],
         'items.*.manufacturer'           => ['nullable', 'string', 'max:255'],
         'items.*.model'                  => ['nullable', 'string', 'max:255'],
-        'items.*.ratings'                => ['nullable', 'string', 'max:255'],
+        'items.*.rating'                => ['nullable', 'string', 'max:255'],
         'items.*.equipment_condition'    => ['required', 'in:good,fair,damaged'],
         'items.*.service_types'          => ['nullable', 'array'],
         'items.*.service_types.*'        => ['integer', 'exists:kplc_service_types,id'],
         'items.*.notes'                  => ['nullable', 'string', 'max:1000'],
+        'items.*.quote_request_item_id' => ['nullable','integer','exists:public_quote_request_items,id',
+],
     ]);
 
     if ($quoteRequest->status === 'converted' && $quoteRequest->calibration_id) {
@@ -154,7 +156,7 @@ class PublicQuoteRequestController extends Controller
             'serial_number'       => $first['serial_number'],
             'manufacturer'        => $first['manufacturer'] ?? null,
             'model'               => $first['model'] ?? null,
-            'ratings'             => $first['ratings'] ?? null,
+            'ratings'             => $first['rating'] ?? null,
             'equipment_condition' => $first['equipment_condition'],
             'service_types'       => $first['service_types'] ?? [],
         ]);

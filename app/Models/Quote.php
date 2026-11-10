@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Quote extends Model
 {
@@ -161,30 +162,43 @@ class Quote extends Model
         return $this->status === self::STATUS_CANCELLED;
     }
 
-    public function canBeSent(): bool
-    {
-        return $this->isDraft();
-    }
+   
+public function canBeApproved(): bool
+{
+    return $this->status === self::STATUS_DRAFT
+        && !$this->isExpiredByDate();
+}
 
-    public function canBeApproved(): bool
-    {
-        return $this->isSent();
-    }
+public function canBeSent(): bool
+{
+    return $this->status === self::STATUS_APPROVED
+        && !$this->isExpiredByDate();
+}
 
-    public function canBeRejected(): bool
-    {
-        return in_array($this->status, [
-            self::STATUS_DRAFT,
-            self::STATUS_SENT,
-        ], true);
-    }
+public function canBeRejected(): bool
+{
+    return $this->status === self::STATUS_DRAFT;
+}
 
+
+    /**
+     * Customer payment is allowed only after an approved quotation
+     * has been sent, while a positive balance remains outstanding.
+     */
     public function canReceivePayment(): bool
     {
-        return in_array($this->status, [
-            self::STATUS_APPROVED,
-            self::STATUS_PARTIAL_PAID,
-        ], true);
+        return (bool) $this->is_external
+            && in_array($this->status, [
+                self::STATUS_SENT,
+                self::STATUS_PARTIAL_PAID,
+            ], true)
+            && !$this->isExpired()
+            && (float) ($this->total_amount ?? 0) > 0
+            && max(
+                0,
+                (float) ($this->total_amount ?? 0)
+                    - (float) ($this->amount_paid ?? 0)
+            ) > 0;
     }
 
     /*
@@ -382,6 +396,8 @@ class Quote extends Model
     */
 
 
+
+
 public function calculateTotals(): array
 {
     $serviceSubtotal = 0.0;
@@ -409,27 +425,23 @@ public function calculateTotals(): array
     $serviceSubtotal = round($serviceSubtotal, 2);
     $onsiteTotal = round($onsiteTotal, 2);
 
+    // The active quotation form uses percentage discounts.
     $discountPercentage = max(
         0,
         min(100, (float) ($this->discount_percentage ?? 0))
     );
 
-    // Stored discount_amount is the total applied discount,
-    // not an additional discount.
-    $storedDiscount = max(
-        0,
-        (float) ($this->discount_amount ?? 0)
+    $discountAmount = round(
+        $serviceSubtotal * $discountPercentage / 100,
+        2
     );
 
-    $discountAmount = $storedDiscount > 0
-        ? min($serviceSubtotal, $storedDiscount)
-        : round($serviceSubtotal * $discountPercentage / 100, 2);
-
-    $taxableAmount = max(
-        0,
-        $serviceSubtotal - $discountAmount
+    $taxableAmount = round(
+        max(0, $serviceSubtotal - $discountAmount),
+        2
     );
 
+    // Use the approved VAT rate stored on the quotation.
     $taxRate = max(
         0,
         min(100, (float) ($this->tax_rate ?? 0))
@@ -440,6 +452,7 @@ public function calculateTotals(): array
         2
     );
 
+    // Onsite costs are added after VAT under the current rule.
     $totalAmount = round(
         $taxableAmount + $taxAmount + $onsiteTotal,
         2
@@ -448,10 +461,7 @@ public function calculateTotals(): array
     return [
         'subtotal' => $serviceSubtotal,
         'onsite_total' => $onsiteTotal,
-        'percentage_discount' => round(
-            $serviceSubtotal * $discountPercentage / 100,
-            2
-        ),
+        'percentage_discount' => $discountAmount,
         'fixed_discount' => 0.0,
         'total_discount' => $discountAmount,
         'taxable_amount' => $taxableAmount,
@@ -459,6 +469,7 @@ public function calculateTotals(): array
         'total' => $totalAmount,
     ];
 }
+
 
 
  public function updateTotals(): void
@@ -491,39 +502,41 @@ public function calculateTotals(): array
     |--------------------------------------------------------------------------
     */
 
-    public function markAsSent(): void
-    {
-        if (!$this->canBeSent()) {
-            throw new \DomainException(
-                'Only draft quotations can be sent.'
-            );
-        }
-
-        $this->update([
-            'status' => self::STATUS_SENT,
-            'sent_at' => now(),
-        ]);
+   
+public function markAsApproved(
+    int $userId,
+    ?string $notes = null
+): void {
+    if (!$this->canBeApproved()) {
+        throw new \DomainException(
+            'Only valid draft quotations can be approved.'
+        );
     }
 
-    public function markAsApproved(
-        int $userId,
-        ?string $notes = null
-    ): void {
-        if (!$this->canBeApproved()) {
-            throw new \DomainException(
-                'Only sent quotations can be approved.'
-            );
-        }
+    $this->update([
+        'status' => self::STATUS_APPROVED,
+        'approved_by' => $userId,
+        'approved_at' => now(),
+        'approval_notes' => $notes,
+        'rejected_at' => null,
+        'rejection_reason' => null,
+    ]);
+}
 
-        $this->update([
-            'status' => self::STATUS_APPROVED,
-            'approved_by' => $userId,
-            'approved_at' => now(),
-            'approval_notes' => $notes,
-            'rejected_at' => null,
-            'rejection_reason' => null,
-        ]);
+public function markAsSent(): void
+{
+    if (!$this->canBeSent()) {
+        throw new \DomainException(
+            'Only approved quotations can be sent to customers.'
+        );
     }
+
+    $this->update([
+        'status' => self::STATUS_SENT,
+        'sent_at' => now(),
+    ]);
+}
+
 
     public function markAsRejected(?string $reason = null): void
     {
@@ -539,41 +552,6 @@ public function calculateTotals(): array
             'rejection_reason' => $reason,
         ]);
     }
-
-    // public function recordPayment(float $amount): void
-    // {
-    //     if (!$this->canReceivePayment()) {
-    //         throw new \DomainException(
-    //             'Only approved quotations can receive payments.'
-    //         );
-    //     }
-
-    //     if ($amount <= 0) {
-    //         throw new \InvalidArgumentException(
-    //             'Payment amount must be greater than zero.'
-    //         );
-    //     }
-
-    //     $currentPaid = (float) ($this->amount_paid ?? 0);
-    //     $newAmountPaid = min(
-    //         (float) $this->total_amount,
-    //         $currentPaid + $amount
-    //     );
-
-    //     $newBalance = max(
-    //         0,
-    //         (float) $this->total_amount - $newAmountPaid
-    //     );
-
-    //     $status = $newBalance <= 0
-    //         ? self::STATUS_PAID
-    //         : self::STATUS_PARTIAL_PAID;
-
-    //     $this->update([
-    //         'amount_paid' => $newAmountPaid,
-    //         'status' => $status,
-    //     ]);
-    // }
 
     /*
     |--------------------------------------------------------------------------
@@ -613,67 +591,70 @@ public function calculateTotals(): array
         return $this->currency_code . ' '
             . number_format((float) ($amount ?? 0), 2);
     }
+    /** All M-Pesa attempts associated with this quotation. */
     public function mpesaPayments(): HasMany
-{
-    return $this->hasMany(
-        MpesaPayment::class,
-        'quote_id'
-    );
-}
-
-public function successfulMpesaPayments(): HasMany
-{
-    return $this->hasMany(
-        MpesaPayment::class,
-        'quote_id'
-    )->where(
-        'status',
-        MpesaPayment::STATUS_COMPLETED
-    );
-}
-public function recordPayment(float $amount): void
-{
-    if (!$this->canReceivePayment()) {
-        throw new \DomainException(
-            'Only approved quotations can receive payments.'
-        );
+    {
+        return $this->hasMany(MpesaPayment::class, 'quote_id');
     }
 
-    if ($amount <= 0) {
-        throw new \InvalidArgumentException(
-            'Payment amount must be greater than zero.'
-        );
+    /** Successfully completed M-Pesa transactions only. */
+    public function successfulMpesaPayments(): HasMany
+    {
+        return $this->mpesaPayments()
+            ->where('status', MpesaPayment::STATUS_COMPLETED);
     }
 
-    $totalAmount = (float) ($this->total_amount ?? 0);
-    $currentPaid = (float) ($this->amount_paid ?? 0);
+    /**
+     * Record a confirmed payment against this quotation.
+     *
+     * The database row is locked to prevent simultaneous updates from
+     * overwriting each other. Call only after the payment has been verified.
+     * Do not call this for a transaction already included in amount_paid.
+     * Transaction-level deduplication belongs in the payment ledger/service.
+     */
+    public function recordPayment(float $amount): void
+    {
+        if (!is_finite($amount) || $amount <= 0 || round($amount, 2) <= 0) {
+            throw new \InvalidArgumentException('Payment amount must be greater than zero.');
+        }
 
-    $newAmountPaid = min(
-        $totalAmount,
-        $currentPaid + $amount
-    );
+        if (abs($amount - round($amount, 2)) > 0.000001) {
+            throw new \InvalidArgumentException('Payment amount cannot have more than two decimal places.');
+        }
 
-    $newBalance = max(
-        $totalAmount - $newAmountPaid,
-        0
-    );
+        DB::transaction(function () use ($amount): void {
+            $quote = self::query()->lockForUpdate()->findOrFail($this->getKey());
 
-    $quotationStatus = $newBalance <= 0
-        ? self::STATUS_PAID
-        : self::STATUS_PARTIAL_PAID;
+            if (!$quote->canReceivePayment()) {
+                throw new \DomainException(
+                    'Only sent, valid external quotations with an outstanding balance can receive payments.'
+                );
+            }
 
-    $mpesaStatus = $newBalance <= 0
-        ? 'paid'
-        : 'partially_paid';
+            $totalCents = (int) round((float) $quote->total_amount * 100);
+            $paidCents = (int) round((float) ($quote->amount_paid ?? 0) * 100);
+            $incomingCents = (int) round($amount * 100);
+            $remainingCents = max(0, $totalCents - $paidCents);
 
-    $this->forceFill([
-        'amount_paid' => $newAmountPaid,
-        'balance_due' => $newBalance,
-        'status' => $quotationStatus,
-        'mpesa_payment_status' => $mpesaStatus,
-        'paid_at' => $newBalance <= 0
-            ? now()
-            : null,
-    ])->save();
-}
+            if ($incomingCents > $remainingCents) {
+                throw new \DomainException(
+                    'Payment exceeds the outstanding quotation balance.'
+                );
+            }
+
+            $newPaidCents = $paidCents + $incomingCents;
+            $newBalanceCents = $totalCents - $newPaidCents;
+            $fullyPaid = $newBalanceCents === 0;
+
+            $quote->forceFill([
+                'amount_paid' => $newPaidCents / 100,
+                'balance_due' => $newBalanceCents / 100,
+                'status' => $fullyPaid ? self::STATUS_PAID : self::STATUS_PARTIAL_PAID,
+                'mpesa_payment_status' => $fullyPaid ? 'paid' : 'partially_paid',
+                'paid_at' => $fullyPaid ? now() : null,
+            ])->save();
+        }, 3);
+
+        $this->refresh();
+    }
 }

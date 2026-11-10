@@ -7,6 +7,7 @@ use App\Models\Quote;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -92,10 +93,18 @@ class MpesaService
             $phoneNumber
         );
 
-        $this->validatePaymentAmount(
-            $quote,
-            $amount
-        );
+        // Re-read under a row lock. This does not reserve the balance;
+        // outstanding concurrent STK requests must also be reconciled.
+        DB::transaction(function () use ($quote, $amount): void {
+            $current = Quote::query()->lockForUpdate()->findOrFail($quote->id);
+            if (!$current->is_external || !$current->canReceivePayment()) {
+                throw ValidationException::withMessages([
+                    'quotation' => 'Only valid, sent external quotations with an outstanding balance can receive payment.',
+                ]);
+            }
+            $this->validatePaymentAmount($current, $amount);
+            $quote->setRawAttributes($current->getAttributes(), true);
+        });
 
         $timestamp = now()->format('YmdHis');
 
@@ -336,7 +345,7 @@ class MpesaService
         Quote $quote,
         float $amount
     ): void {
-        if ($amount <= 0) {
+        if (!is_finite($amount) || $amount <= 0) {
             throw ValidationException::withMessages([
                 'amount' =>
                     'The payment amount must be greater than zero.',
@@ -367,7 +376,7 @@ class MpesaService
         /*
          * STK Push uses a whole-number amount.
          */
-        if (round($amount, 2) !== round($amount)) {
+        if (abs($amount - round($amount)) > 0.000001) {
             throw ValidationException::withMessages([
                 'amount' =>
                     'M-PESA payment amounts must be whole Kenyan shillings.',
@@ -422,7 +431,8 @@ public function buildAccountReference(
         );
     }
 
-    return $account . '-QT' . $sequence;
+    // Include quote ID so different customers' identical sequences do not collide.
+    return substr($account . '-Q' . $quote->id . '-' . $sequence, 0, 12);
 }
 
     private function generatePaymentReference(): string

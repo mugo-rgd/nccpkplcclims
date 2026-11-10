@@ -41,4 +41,8 @@ return [
                     'timeout' => (int) env('OPENAI_TIMEOUT', 60),
                 ],
 
+    'vat' => [
+                 'standard_rate' => (float) env('STANDARD_VAT_RATE', 16.00),
+             ],
+
 ];

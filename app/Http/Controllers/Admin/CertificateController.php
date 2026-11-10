@@ -2098,7 +2098,7 @@ public function downloadCombined(Certificate $certificate)
                     'manufacturer' => $row['manufacturer'] ?? null,
                     'model' => $row['model'] ?? null,
                     'accuracy_class' => $row['accuracy_class'] ?? null,
-                    'ratings' => $row['ratings'] ?? null,
+                    'ratings' => $row['rating'] ?? null,
                     'equipment_type_id' => $equipmentTypeId,
                     'equipment_condition' => $row['equipment_condition'] ?? 'Good',
                     'last_calibration_date' => !empty($row['last_calibration_date']) ? $row['last_calibration_date'] : null,

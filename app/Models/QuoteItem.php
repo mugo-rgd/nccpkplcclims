@@ -25,6 +25,6 @@ class QuoteItem extends Model
 
     public function quote(): BelongsTo
     {
-        return $this->belongsTo(quote::class);
+        return $this->belongsTo(Quote::class);
     }
 }

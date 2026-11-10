@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Calibration;
 use App\Models\MpesaPayment;
 use App\Models\Quote;
+use App\Services\Payments\PaymentReconciliationService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +19,8 @@ class MpesaCallbackController extends Controller
      * Receive the M-PESA Express callback.
      */
     public function handle(
-        Request $request
+        Request $request,
+        PaymentReconciliationService $reconciliation
     ): JsonResponse {
         $payload = $request->all();
 
@@ -92,21 +93,6 @@ class MpesaCallbackController extends Controller
             ]);
         }
 
-        /*
-         * Idempotency:
-         * do not process a successful payment twice.
-         */
-        if (
-            $payment->status
-            === MpesaPayment::STATUS_COMPLETED
-        ) {
-            return response()->json([
-                'ResultCode' => 0,
-                'ResultDesc' =>
-                    'Payment already processed.',
-            ]);
-        }
-
         $resultCode = (int) (
             $callback['ResultCode']
             ?? -1
@@ -131,16 +117,26 @@ class MpesaCallbackController extends Controller
                 $payload,
                 $resultCode,
                 $resultDescription,
-                $metadata
+                $metadata,
+                $reconciliation
             ): void {
+                // Lock order matches manual payments: quote first, payment second.
+                Quote::query()->lockForUpdate()->findOrFail($payment->quote_id);
                 $lockedPayment = MpesaPayment::query()
                     ->lockForUpdate()
                     ->findOrFail($payment->id);
 
-                if (
-                    $lockedPayment->status
-                    === MpesaPayment::STATUS_COMPLETED
-                ) {
+                if ($lockedPayment->status === MpesaPayment::STATUS_COMPLETED) {
+                    // Repeated callbacks are safe; also repairs a completed payment
+                    // whose ledger posting was previously interrupted.
+                    $reconciliation->postCompletedMpesa($lockedPayment);
+                    return;
+                }
+
+                if (in_array($lockedPayment->status, [
+                    MpesaPayment::STATUS_CANCELLED,
+                    MpesaPayment::STATUS_TIMEOUT,
+                ], true) && $resultCode !== 0) {
                     return;
                 }
 
@@ -199,7 +195,7 @@ class MpesaCallbackController extends Controller
                 ) {
                     $lockedPayment->update([
                         'status' =>
-                            MpesaPayment::STATUS_FAILED,
+                            MpesaPayment::STATUS_PROCESSING,
 
                         'result_code' => $resultCode,
 
@@ -209,9 +205,13 @@ class MpesaCallbackController extends Controller
                                 : 'The supplied M-PESA receipt has already been processed.',
 
                         'callback_payload' => $payload,
-                        'failed_at' => now(),
+                        'failed_at' => null,
                     ]);
 
+                    Log::critical('M-PESA successful payment requires manual receipt reconciliation.', [
+                        'payment_id' => $lockedPayment->id,
+                        'receipt' => $receiptNumber,
+                    ]);
                     return;
                 }
 
@@ -227,7 +227,7 @@ class MpesaCallbackController extends Controller
                 ) {
                     $lockedPayment->update([
                         'status' =>
-                            MpesaPayment::STATUS_FAILED,
+                            MpesaPayment::STATUS_PROCESSING,
 
                         'result_code' => $resultCode,
 
@@ -236,9 +236,14 @@ class MpesaCallbackController extends Controller
 
                         'paid_amount' => $paidAmount,
                         'callback_payload' => $payload,
-                        'failed_at' => now(),
+                        'failed_at' => null,
                     ]);
 
+                    Log::critical('M-PESA successful payment amount mismatch; manual reconciliation required.', [
+                        'payment_id' => $lockedPayment->id,
+                        'expected' => $lockedPayment->amount,
+                        'received' => $paidAmount,
+                    ]);
                     return;
                 }
 
@@ -268,22 +273,21 @@ class MpesaCallbackController extends Controller
                     'failed_at' => null,
                 ]);
 
-                $this->reconcileQuote(
-                    $lockedPayment
-                );
-            });
+                // Both records commit together, or neither commits.
+                $reconciliation->postCompletedMpesa($lockedPayment);
+            }, 3);
         } catch (Throwable $exception) {
             report($exception);
 
             /*
-             * Returning 200 acknowledges receipt, but the error remains
-             * in Laravel logs for controlled reconciliation.
+             * Return 500 for a transient database/posting failure so the
+             * sender can retry. Transaction rollback preserves consistency.
              */
             return response()->json([
                 'ResultCode' => 0,
                 'ResultDesc' =>
-                    'Callback received for review.',
-            ]);
+                    'Callback processing failed; retry required.',
+            ], 500);
         }
 
         return response()->json([
@@ -363,101 +367,6 @@ class MpesaCallbackController extends Controller
                     ? now()
                     : null,
         ]);
-    }
-
-    /**
-     * Recalculate quote payment totals from successful M-PESA payments.
-     */
-    private function reconcileQuote(
-        MpesaPayment $payment
-    ): void {
-        $quote = Quote::query()
-            ->lockForUpdate()
-            ->find($payment->quote_id);
-
-        if (!$quote) {
-            return;
-        }
-
-        /*
-         * Preserve any payments already recorded outside this
-         * M-PESA integration by taking the greater of:
-         *
-         * 1. Existing amount_paid
-         * 2. Total successful M-PESA payments
-         *
-         * Change this rule if all quote payments will be recorded
-         * through mpesa_payments.
-         */
-        $successfulMpesaTotal =
-            (float) MpesaPayment::query()
-                ->where('quote_id', $quote->id)
-                ->where(
-                    'status',
-                    MpesaPayment::STATUS_COMPLETED
-                )
-                ->sum('paid_amount');
-
-        $existingAmountPaid =
-            (float) $quote->amount_paid;
-
-        $newAmountPaid = max(
-            $successfulMpesaTotal,
-            $existingAmountPaid
-        );
-
-        $totalAmount = (float) $quote->total_amount;
-
-        $balanceDue = max(
-            $totalAmount - $newAmountPaid,
-            0
-        );
-
-        $paymentStatus = match (true) {
-            $balanceDue <= 0.01 => 'paid',
-            $newAmountPaid > 0 => 'partially_paid',
-            default => 'unpaid',
-        };
-
-        $quote->update([
-            'amount_paid' => $newAmountPaid,
-            'balance_due' => $balanceDue,
-
-            'mpesa_payment_status' =>
-                $paymentStatus,
-
-            'paid_at' => $paymentStatus === 'paid'
-                ? now()
-                : null,
-
-            'payment_method' => 'mpesa',
-
-            'payment_reference' =>
-                $payment->mpesa_receipt_number,
-        ]);
-
-        /*
-         * Optionally synchronize the related calibration.
-         *
-         * Only enable this block if your calibration payment fields
-         * use these exact column names.
-         */
-
-        if ($quote->calibration_id) {
-           Calibration::query()
-            ->whereKey($quote->calibration_id)
-            ->update([
-                'amount_paid' => $newAmountPaid,
-                'payment_method' => 'mpesa',
-                'payment_reference' =>
-                    $payment->mpesa_receipt_number,
-                'payment_status' =>
-                    $paymentStatus === 'paid'
-                        ? 'paid'
-                        : 'partial',
-            ]);
-        }
-
     }
 
     private function parseTransactionDate(

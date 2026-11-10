@@ -291,6 +291,20 @@
         text-align: left;
     }
 
+    .payment-status-box {
+        padding: 8px;
+        border: 1px solid #159447;
+        border-radius: 4px;
+        background: #f8fff9;
+        font-size: 8px;
+        line-height: 1.4;
+    }
+    .payment-status-box h4 {
+        color: #087c37;
+        font-size: 11px;
+        margin: 0 0 5px;
+    }
+    .payment-note { font-size: 7px; color: #555; margin-top: 5px; }
     .terms {
         min-height: 130px;
         padding: 6px 8px;
@@ -338,7 +352,19 @@
     $tax = (float) ($quote->tax_amount ?? 0);
     $total = (float) ($quote->total_amount ?? 0);
     $paid = (float) ($quote->amount_paid ?? 0);
-    $balance = (float) ($quote->balance_due ?? max(0, $total - $paid));
+    // Internal quotations do not request payment unless explicitly required.
+    $requiresPayment = (bool) ($quote->is_external ?? false)
+        && (bool) ($calibration?->requires_payment ?? true);
+    $balance = $requiresPayment
+        ? max(0, round($total - $paid, 2))
+        : 0.0;
+    $isPaid = $requiresPayment && $total > 0 && $balance <= 0 && $paid >= $total;
+    $hasPaymentActivity = $paid > 0 || filled($quote->payment_reference);
+    $paymentReference = $quote->payment_reference ?? null;
+    $paymentMethod = $quote->payment_method ?? null;
+    // The service supplies a base64-encoded SVG payment QR and account reference.
+    $hasPaymentQr = $requiresPayment && $balance > 0 && !empty($paymentQrCode);
+    $paybill = $mpesaPaybill ?? '883380';
     $quoteDate = $quote->created_at ?? now();
     $expiry = $quote->valid_until;
     $quoteLines = collect($quote->items_data ?? []);
@@ -372,7 +398,68 @@
             <h2>QUOTATION</h2>
             <p>Kenya Power &amp; Lighting Company</p>
         </td>
-        <td class="qrcode-cell"></td>
+        {{-- <td class="qrcode-cell"></td> --}}
+        <td class="qrcode-cell">
+    @php
+        $qrBase64 = null;
+
+        try {
+
+            /*
+             * Generates:
+             * http://ncckplims.test/calibrations/82/quotation
+             */
+            $qrUrl = route('calibrations.quotation', [
+                'calibration' => $calibration->id,
+            ]);
+
+            $qrSvg = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')
+                ->size(180)
+                ->margin(1)
+                ->errorCorrection('H')
+                ->generate($qrUrl);
+
+            $qrBase64 = base64_encode($qrSvg);
+
+        } catch (\Throwable $e) {
+
+            \Illuminate\Support\Facades\Log::error(
+                'Quotation QR generation failed',
+                [
+                    'calibration_id' => $calibration->id ?? null,
+                    'error' => $e->getMessage(),
+                ]
+            );
+
+            $qrBase64 = null;
+        }
+    @endphp
+
+    @if($qrBase64)
+        <img
+            src="data:image/svg+xml;base64,{{ $qrBase64 }}"
+            alt="Quotation QR Code"
+            style="width:65px;height:65px;"
+        >
+
+        <div style="
+            margin-top:2px;
+            font-size:7px;
+            color:#555;
+            text-align:center;
+        ">
+            Scan to view
+        </div>
+    @else
+        <div style="
+            font-size:7px;
+            color:#999;
+            text-align:center;
+        ">
+            QR unavailable
+        </div>
+    @endif
+</td>
     </tr>
 </table>
 <div class="quote-number">
@@ -473,7 +560,7 @@
                 @endif
                 <tr><td colspan="3">VAT ({{ number_format($taxRate, 2) }}%)</td><td style="text-align:right">{{ number_format($tax, 2) }}</td></tr>
                 <tr class="total-row"><td colspan="3">TOTAL ({{ $currency }})</td><td style="text-align:right"><strong class="amount">{{ number_format($total, 2) }}</strong></td></tr>
-                @if($paid > 0)
+                @if($requiresPayment || $hasPaymentActivity)
                     <tr><td colspan="3">Amount Paid</td><td style="text-align:right">{{ number_format($paid, 2) }}</td></tr>
                     <tr class="total-row"><td colspan="3">Balance Due</td><td style="text-align:right">{{ number_format($balance, 2) }}</td></tr>
                 @endif
@@ -484,16 +571,50 @@
 <table class="bottom-section-table">
     <tr>
         <td class="payment-column">
-            @if(!empty($paymentQrCode) && $balance > 0)
+            @if($requiresPayment && $balance > 0)
                 <div class="mpesa-payment-box">
                     <div class="mpesa-payment-heading">PAY WITH M-PESA</div>
-                    <img src="data:image/svg+xml;base64,{{ $paymentQrCode }}" alt="M-PESA payment QR code" class="mpesa-payment-qr">
-                    <div class="mpesa-payment-text">Scan the QR code or pay using the details below.</div>
+                    @if($hasPaymentQr)
+                        <img src="data:image/svg+xml;base64,{{ $paymentQrCode }}" alt="M-PESA payment QR code" class="mpesa-payment-qr">
+                        <div class="mpesa-payment-text">Scan the QR code to open the secure quotation payment page, or use the payment details below.</div>
+                    @else
+                        <div class="mpesa-payment-text">Use the payment details below. The QR payment link is currently unavailable.</div>
+                    @endif
                     <table class="payment-details-table">
-                        <tr><td class="label">Paybill</td><td>883380</td></tr>
-                        <tr><td class="label">Account</td><td>{{ $accountReference ?? 'N/A' }}</td></tr>
+                        <tr><td class="label">Paybill</td><td>{{ $paybill }}</td></tr>
+                        <tr><td class="label">Account</td><td>{{ $accountReference ?? 'Contact MCL for payment reference' }}</td></tr>
                         <tr><td class="label">Amount Due</td><td>{{ $currency }} {{ number_format($balance, 2) }}</td></tr>
                     </table>
+                    @if($paid > 0)
+                        <div class="payment-note">Part payment received: {{ $currency }} {{ number_format($paid, 2) }}</div>
+                    @endif
+                    @if($paymentReference)
+                        <div class="payment-note">Last payment reference: {{ $paymentReference }}</div>
+                    @endif
+                </div>
+            @elseif($isPaid)
+                <div class="payment-status-box">
+                    <h4>PAYMENT RECEIVED - PAID</h4>
+                    <div><strong>Amount:</strong> {{ $currency }} {{ number_format($paid, 2) }}</div>
+                    <div><strong>Balance:</strong> {{ $currency }} 0.00</div>
+                    @if($paymentMethod)
+                        <div><strong>Method:</strong> {{ strtoupper(str_replace('_', ' ', $paymentMethod)) }}</div>
+                    @endif
+                    @if($paymentReference)
+                        <div><strong>Reference:</strong> {{ $paymentReference }}</div>
+                    @endif
+                    @if($quote->paid_at)
+                        <div><strong>Paid on:</strong> {{ $quote->paid_at->format('d/m/Y H:i') }}</div>
+                    @endif
+                    <div class="payment-note">No further payment is requested for this quotation.</div>
+                </div>
+            @elseif($hasPaymentActivity)
+                <div class="payment-status-box">
+                    <h4>PAYMENT INFORMATION</h4>
+                    <div><strong>Amount recorded:</strong> {{ $currency }} {{ number_format($paid, 2) }}</div>
+                    @if($paymentReference)
+                        <div><strong>Reference:</strong> {{ $paymentReference }}</div>
+                    @endif
                 </div>
             @endif
         </td>

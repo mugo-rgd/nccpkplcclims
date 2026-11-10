@@ -843,6 +843,19 @@ $canReviewQuotation = $currentUser?->hasAnyRole([
                                             </a>
                                         @endcan
 
+{{-- Payments are linked to the latest quotation for this calibration. --}}
+@can('payments.view')
+    @if($calibration->is_external && $latestQuotation && $latestQuotation->is_external && Route::has('admin.payments.index'))
+        <a href="{{ route('admin.payments.index', $latestQuotation) }}"
+           class="btn btn-sm btn-success"
+           title="Manage payments for {{ $latestQuotation->quote_number }}"
+           aria-label="Manage payments for {{ $latestQuotation->quote_number }}"
+           onclick="event.stopPropagation();">
+            <i class="fas fa-money-bill-wave"></i>
+        </a>
+    @endif
+@endcan
+
                                         <!-- Assign Technician -->
                                         @can('assign_calibrations')
                                             @if(in_array($calibration->status, ['pending', 'paid']))

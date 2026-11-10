@@ -12,6 +12,11 @@ class PublicQuoteRequestItem extends Model
         'public_quote_request_id',
         'equipment_type_id',
         'service_type_id',
+        'equipment_name',
+        'serial_number',
+        'manufacturer',
+        'model',
+        'rating',
         'quantity',
     ];
 
@@ -20,20 +25,27 @@ class PublicQuoteRequestItem extends Model
         return $this->belongsTo(PublicQuoteRequest::class, 'public_quote_request_id');
     }
 
- // app/Models/PublicQuoteRequestItem.php
-public function equipmentType()
-{
-    return $this->belongsTo(\App\Models\KplcEquipmentType::class, 'equipment_type_id');
-}
+    public function equipmentType()
+    {
+        return $this->belongsTo(
+            \App\Models\KplcEquipmentType::class,
+            'equipment_type_id'
+        );
+    }
 
-   // app/Models/PublicQuoteRequestItem.php
-public function serviceType()
-{
-    return $this->belongsTo(\App\Models\KplcServiceType::class, 'service_type_id');
-}
+    public function serviceType()
+    {
+        return $this->belongsTo(
+            \App\Models\KplcServiceType::class,
+            'service_type_id'
+        );
+    }
 
-public function calibrationItem()
-{
-    return $this->hasOne(CalibrationItem::class, 'quote_request_item_id');
-}
+    public function calibrationItem()
+    {
+        return $this->hasOne(
+            CalibrationItem::class,
+            'quote_request_item_id'
+        );
+    }
 }

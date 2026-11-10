@@ -275,7 +275,7 @@ foreach ($equipmentItems as $equipment) {
                 @elseif(!$customerEmail)
                     <div class="alert alert-warning mt-3 mb-0">The customer has no email address.</div>
                 @else
-                    <div class="alert alert-success mt-3 mb-0">Quotation <strong>{{ $quotation->quotation_number ?? '#' . $quotation->id }}</strong> has been saved and can be sent to <strong>{{ $customerEmail }}</strong>.</div>
+                    <div class="alert alert-success mt-3 mb-0">Quotation <strong>{{ $quotation->quote_number ?? '#' . $quotation->id }}</strong> has been saved and can be sent to <strong>{{ $customerEmail }}</strong>.</div>
                 @endif
             </form>
 
