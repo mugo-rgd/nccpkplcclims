@@ -1,11 +1,78 @@
+# ==========================================================
+# MCL - Git Attributes
+# Windows Development / Linux Production
+# ==========================================================
+
+# Default: automatically detect text files and normalize to LF
 * text=auto eol=lf
 
+# PHP and Laravel Blade
+*.php text eol=lf
+*.blade.php text eol=lf
+
+# Frontend
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.html text eol=lf
+*.vue text eol=lf
+
+# Configuration
+*.json text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ini text eol=lf
+*.conf text eol=lf
+*.env.example text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.svg text eol=lf
+
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.7z binary
+*.xlsx binary
+*.xls binary
+*.docx binary
+*.pptx binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+
+# Diff settings
 *.blade.php diff=html
 *.css diff=css
 *.html diff=html
 *.md diff=markdown
 *.php diff=php
 
+# Exclude development files from Git archives
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
